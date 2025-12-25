@@ -1,0 +1,54 @@
+# Data Configuration
+data:
+  api_provider: yfinance  # or alpha_vantage
+  cache_dir: ./data/cache
+  cache_format: parquet    # parquet or csv
+  assets:
+    - SPY
+    - QQQ
+    - AAPL
+  start_date: 2004-01-01
+  end_date: 2024-12-31
+  retry_attempts: 3
+  rate_limit_delay: 1.0  # seconds between API requests
+
+# Volatility Estimation Configuration
+volatility:
+  default_estimator: yang_zhang  # Best overall estimator
+  default_window: 60              # Trading days
+  ewma_lambda: 0.94               # RiskMetrics standard
+  annualization_factor: 252       # Trading days per year
+  min_window_size: 10             # Minimum for valid estimate
+  max_window_size: 500             # Maximum window size
+
+# Event Analysis Configuration
+events:
+  data_source: csv  # or fred_api
+  csv_path: ./data/events/economic_calendar.csv
+  pre_window: 5         # Days before event
+  post_window: 5        # Days after event
+  fred_api_key: null    # Set via environment variable FRED_API_KEY
+
+# Prediction Configuration
+predictions:
+  historical_lookback: 252        # Days of history for pattern matching
+  pattern_matching_window: 60     # Window for similarity calculation
+  confidence_threshold: 0.8      # Minimum similarity score
+  similarity_weights:
+    event_type: 0.4              # Weight for event type match
+    volatility_regime: 0.3        # Weight for volatility regime match
+    market_condition: 0.3          # Weight for market condition match
+
+# Output Configuration
+output:
+  excel_dir: ./outputs/excel
+  chart_dir: ./outputs/charts
+  summary_dir: ./outputs/summaries
+  include_predictions: true
+
+# Logging Configuration
+logging:
+  level: INFO           # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: ./logs/volatility_estimator.log
+  console: true
+

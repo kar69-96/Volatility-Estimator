@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Test</title>
+</head>
+<body>
+    <h1>Connection Test</h1>
+    <p>If you can see this, the server is working.</p>
+    <p><a href="http://localhost:8502">Open Streamlit App</a></p>
+    <p><a href="http://127.0.0.1:8502">Open Streamlit App (IP)</a></p>
+    <script>
+        fetch('http://localhost:8502/_stcore/health')
+            .then(r => r.text())
+            .then(data => {
+                document.body.innerHTML += '<p style="color:green;">✓ Server is reachable!</p>';
+            })
+            .catch(e => {
+                document.body.innerHTML += '<p style="color:red;">✗ Cannot reach server: ' + e + '</p>';
+            });
+    </script>
+</body>
+</html>
+
