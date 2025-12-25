@@ -26,7 +26,6 @@ It’s meant to be easy to explore interactively (Streamlit) but also usable fro
 ## Quick start (Streamlit)
 
 ```bash
-cd /Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator
 python3.10 -m venv venv310
 source venv310/bin/activate
 pip install -r requirements.txt
