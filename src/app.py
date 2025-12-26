@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import yaml
+from datetime import date
 
 # Set environment variables for Streamlit configuration
 os.environ['STREAMLIT_BROWSER_GATHER_USAGE_STATS'] = 'false'
@@ -47,11 +48,15 @@ from src.reporting import (
 from src.utils import load_events, setup_logging
 
 
+def format_estimator_name(name: str) -> str:
+    """Format estimator name with spaces instead of underscores."""
+    return name.replace('_', ' ').title()
+
+
 # Page configuration - MUST be the very first Streamlit command
 # No code should execute before this
 st.set_page_config(
     page_title="Volatility Estimator Stack",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -62,24 +67,59 @@ st.markdown("""
     .main {
         padding-top: 2rem;
     }
-    .stSelectbox > div > div {
-        background-color: #f8f9fa;
-    }
     h1 {
         font-size: 2.5rem;
         font-weight: 300;
         letter-spacing: -0.02em;
+        color: #000000;
     }
     h2 {
         font-size: 1.5rem;
         font-weight: 300;
         margin-top: 2rem;
+        color: #000000;
     }
-    .metric-card {
+    h3 {
+        font-size: 1.2rem;
+        font-weight: 300;
+        color: #000000;
+    }
+    .stButton > button {
         background-color: #ffffff;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #e0e0e0;
+        color: #000000;
+        border: 1px solid #000000;
+        border-radius: 0;
+    }
+    .stButton > button[kind="primary"] {
+        background-color: #ff0000;
+        color: #ffffff;
+        border: 1px solid #ff0000;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #cc0000;
+        border-color: #cc0000;
+    }
+    .stSelectbox > div > div {
+        background-color: #ffffff;
+        border: 1px solid #000000;
+    }
+    .stDateInput > div > div > input {
+        border: 1px solid #000000;
+    }
+    .stSlider > div > div {
+        color: #000000;
+    }
+    .stRadio > div > label {
+        color: #000000;
+    }
+    .stMetric {
+        color: #000000;
+    }
+    .stExpander {
+        border: 1px solid #000000;
+    }
+    .stExpander > div > div {
+        color: #000000;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -95,7 +135,7 @@ def load_config(config_path='config.yaml'):
         return {}
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_market_data(symbol, start_date, end_date, use_cache=True):
     """Load market data with caching."""
     try:
@@ -120,15 +160,17 @@ def load_market_data(symbol, start_date, end_date, use_cache=True):
         )
         return df
     except Exception as e:
-        import traceback
-        error_msg = f"Error loading data: {str(e)}\n{traceback.format_exc()}"
-        st.error(error_msg)
+        # Return None on error - error handling done in calling code
         return None
 
 
 # Main function - Streamlit runs this automatically
 def main():
     """Main Streamlit app."""
+    
+    # Initialize session state for multiple tickers
+    if 'tickers' not in st.session_state:
+        st.session_state.tickers = ['SPY']
     
     # Title
     st.title("Volatility Estimator Stack")
@@ -143,27 +185,75 @@ def main():
     
     # Sidebar - Input Controls
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("Configuration")
         
-        # Asset Selection
-        default_assets = data_config.get('assets', ['SPY', 'QQQ', 'AAPL'])
-        symbol = st.selectbox(
-            "Asset Symbol",
-            options=default_assets + ['MSFT', 'GOOGL', 'TSLA', 'NVDA'],
-            index=0
-        )
+        # S&P500 Checkbox
+        include_spy = st.checkbox("Include S&P 500 (SPY)", value=False)
+        
+        # Asset Selection - Multiple tickers
+        st.write("**Asset Symbols**")
+        tickers_to_remove = []
+        
+        for i, ticker in enumerate(st.session_state.tickers):
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                new_ticker = st.text_input(
+                    f"Ticker {i+1}",
+                    value=ticker,
+                    placeholder="Enter ticker (e.g., AAPL, TSLA)",
+                    key=f"ticker_{i}",
+                    label_visibility="visible"
+                ).upper().strip()
+                # Update session state with the new value
+                st.session_state.tickers[i] = new_ticker
+            with col2:
+                if len(st.session_state.tickers) > 1:
+                    st.write("")  # Spacing
+                    if st.button("Remove", key=f"remove_{i}", use_container_width=True):
+                        tickers_to_remove.append(i)
+        
+        # Remove tickers marked for removal
+        for idx in sorted(tickers_to_remove, reverse=True):
+            st.session_state.tickers.pop(idx)
+            # Clear the input field from session state
+            ticker_key = f"ticker_{idx}"
+            if ticker_key in st.session_state:
+                del st.session_state[ticker_key]
+        
+        # Add ticker button
+        if len(st.session_state.tickers) < 5:
+            if st.button("+ Add Ticker", use_container_width=True):
+                st.session_state.tickers.append('')
+        elif len(st.session_state.tickers) >= 5:
+            st.caption("Maximum 5 tickers allowed")
+        
+        # Filter out empty tickers
+        symbols = [t.upper().strip() for t in st.session_state.tickers if t and t.strip()]
+        
+        # Add SPY if checkbox is checked and not already in list
+        if include_spy and 'SPY' not in symbols:
+            symbols.insert(0, 'SPY')
+        
+        if not symbols:
+            st.warning("Please enter at least one ticker symbol or check 'Include S&P 500'.")
+            return
+        
+        # Use first symbol for single-stock analysis modes
+        symbol = symbols[0] if symbols else 'SPY'
         
         # Date Range
         col1, col2 = st.columns(2)
         with col1:
             start_date = st.date_input(
                 "Start Date",
-                value=pd.to_datetime(data_config.get('start_date', '2020-01-01')).date()
+                value=pd.to_datetime(data_config.get('start_date', '2020-01-01')).date(),
+                format="MM/DD/YYYY"
             )
         with col2:
             end_date = st.date_input(
                 "End Date",
-                value=pd.to_datetime(data_config.get('end_date', '2024-12-31')).date()
+                value=date.today(),
+                format="MM/DD/YYYY"
             )
         
         st.markdown("---")
@@ -177,27 +267,29 @@ def main():
         
         st.markdown("---")
         
-        # Estimator Selection (for single mode)
-        if analysis_mode == "Single Estimator":
-            estimator_name = st.selectbox(
-                "Estimator",
-                options=list_estimators(),
-                index=list_estimators().index(vol_config.get('default_estimator', 'yang_zhang'))
+        # Estimator Selection
+        estimator_options = list_estimators()
+        estimator_display = [format_estimator_name(name) for name in estimator_options]
+        default_estimator = vol_config.get('default_estimator', 'yang_zhang')
+        default_index = estimator_options.index(default_estimator) if default_estimator in estimator_options else 0
+        
+        selected_display = st.selectbox(
+            "Estimator",
+            options=estimator_display,
+            index=default_index
+        )
+        estimator_name = estimator_options[estimator_display.index(selected_display)]
+        
+        # EWMA Lambda (if EWMA selected)
+        if estimator_name == 'ewma':
+            lambda_param = st.slider(
+                "EWMA Lambda",
+                min_value=0.80,
+                max_value=0.99,
+                value=vol_config.get('ewma_lambda', 0.94),
+                step=0.01
             )
-            
-            # EWMA Lambda (if EWMA selected)
-            if estimator_name == 'ewma':
-                lambda_param = st.slider(
-                    "EWMA Lambda",
-                    min_value=0.80,
-                    max_value=0.99,
-                    value=vol_config.get('ewma_lambda', 0.94),
-                    step=0.01
-                )
-            else:
-                lambda_param = vol_config.get('ewma_lambda', 0.94)
         else:
-            estimator_name = None
             lambda_param = vol_config.get('ewma_lambda', 0.94)
         
         # Window Size
@@ -224,83 +316,103 @@ def main():
         
         # Action Button
         st.markdown("---")
-        run_analysis = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
+        run_analysis = st.button("Run Analysis", type="primary", use_container_width=True)
     
     # Main Content Area
     if run_analysis:
         # Show loading
         try:
-            with st.spinner(f"Loading data for {symbol}..."):
-                df = load_market_data(symbol, start_date, end_date)
+            # Check if multiple stocks comparison
+            compare_stocks = len(symbols) > 1
             
-            if df is None or len(df) == 0:
-                st.error("Failed to load market data. Please check your internet connection and try again.")
-                st.info("💡 Tip: Make sure you have an internet connection. The first run downloads data from yfinance API.")
-                return
-            
-            st.success(f"✓ Loaded {len(df)} days of data for {symbol}")
-            
-            # Data Quality Check
-            try:
-                quality_report = check_data_quality(df)
-                with st.expander("📊 Data Quality Report"):
-                    st.json({
-                        'Total Rows': quality_report['total_rows'],
-                        'Date Range': f"{quality_report['date_range'][0]} to {quality_report['date_range'][1]}" if quality_report.get('date_range') else 'N/A',
-                        'Missing Values': quality_report.get('missing_values', {})
-                    })
-            except Exception as e:
-                st.warning(f"Could not generate quality report: {str(e)}")
-            
-            # Run Analysis Based on Mode
-            try:
-                if analysis_mode == "Single Estimator":
-                    if estimator_name is None:
-                        st.error("Please select an estimator in the sidebar.")
+            if compare_stocks:
+                # Multi-stock comparison
+                with st.spinner(f"Loading data for {len(symbols)} stocks..."):
+                    all_data = {}
+                    failed_symbols = []
+                    
+                    for sym in symbols:
+                        try:
+                            df = load_market_data(sym, start_date, end_date)
+                            if df is None or len(df) == 0:
+                                failed_symbols.append(sym)
+                            else:
+                                all_data[sym] = df
+                        except Exception as e:
+                            failed_symbols.append(sym)
+                            st.warning(f"Error loading {sym}: {str(e)}")
+                    
+                    if failed_symbols:
+                        st.error(f"Failed to load data for: {', '.join(failed_symbols)}")
+                    
+                    if not all_data:
+                        st.error("No data loaded. Please check your ticker symbols and try again.")
                         return
-                    run_single_estimator(df, estimator_name, window, lambda_param, symbol)
+                    
+                    if len(all_data) < len(symbols):
+                        st.warning(f"Loaded data for {len(all_data)} out of {len(symbols)} stocks. Continuing with available data.")
+                    
+                    # Run multi-stock comparison
+                    run_multi_stock_comparison(all_data, estimator_name, window, lambda_param, list(all_data.keys()))
+            else:
+                # Single stock analysis
+                with st.spinner(f"Loading data for {symbol}..."):
+                    df = load_market_data(symbol, start_date, end_date)
                 
-                elif analysis_mode == "Compare All":
-                    run_comparison(df, window, lambda_param, symbol)
+                if df is None or len(df) == 0:
+                    st.error("Failed to load market data. Please check your internet connection and try again.")
+                    st.info("Tip: Make sure you have an internet connection. The first run downloads data from yfinance API.")
+                    return
                 
-                elif analysis_mode == "Event Analysis":
-                    run_event_analysis(df, window, event_window, symbol)
+                st.success(f"Loaded {len(df)} days of data for {symbol}")
                 
-                elif analysis_mode == "Predictions":
-                    run_predictions(df, window, event_window, symbol)
+                # Data Quality Check
+                try:
+                    quality_report = check_data_quality(df)
+                    with st.expander("Data Quality Report"):
+                        st.json({
+                            'Total Rows': quality_report['total_rows'],
+                            'Date Range': f"{quality_report['date_range'][0]} to {quality_report['date_range'][1]}" if quality_report.get('date_range') else 'N/A',
+                            'Missing Values': quality_report.get('missing_values', {})
+                        })
+                except Exception as e:
+                    st.warning(f"Could not generate quality report: {str(e)}")
                 
-                elif analysis_mode == "Full Analysis":
-                    run_full_analysis(df, window, lambda_param, event_window, symbol)
-            except Exception as e:
-                import traceback
-                st.error(f"Error running analysis: {str(e)}")
-                with st.expander("🔍 Error Details"):
-                    st.code(traceback.format_exc())
+                # Run Analysis Based on Mode
+                try:
+                    if analysis_mode == "Single Estimator":
+                        run_single_estimator(df, estimator_name, window, lambda_param, symbol)
+                    
+                    elif analysis_mode == "Compare All":
+                        run_comparison(df, window, lambda_param, symbol)
+                    
+                    elif analysis_mode == "Event Analysis":
+                        run_event_analysis(df, window, event_window, symbol)
+                    
+                    elif analysis_mode == "Predictions":
+                        run_predictions(df, window, event_window, symbol)
+                    
+                    elif analysis_mode == "Full Analysis":
+                        run_full_analysis(df, window, lambda_param, event_window, symbol)
+                except Exception as e:
+                    import traceback
+                    st.error(f"Error running analysis: {str(e)}")
+                    with st.expander("Error Details"):
+                        st.code(traceback.format_exc())
         except Exception as e:
             import traceback
             st.error(f"Unexpected error: {str(e)}")
-            with st.expander("🔍 Error Details"):
+            with st.expander("Error Details"):
                 st.code(traceback.format_exc())
     
     else:
         # Welcome message
-        st.info("👈 Configure your analysis in the sidebar and click 'Run Analysis' to begin.")
-        
-        # Show available features
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Estimators", "5")
-        with col2:
-            st.metric("Events", "500+")
-        with col3:
-            st.metric("Assets", "Unlimited")
-        with col4:
-            st.metric("Analysis Modes", "5")
+        st.info("Configure your analysis in the sidebar and click 'Run Analysis' to begin.")
 
 
 def run_single_estimator(df, estimator_name, window, lambda_param, symbol):
     """Run single estimator analysis."""
-    st.header(f"📈 {estimator_name.replace('_', ' ').title()} Estimator")
+    st.header(f"{format_estimator_name(estimator_name)} Estimator")
     
     try:
         if estimator_name == 'ewma':
@@ -327,16 +439,21 @@ def run_single_estimator(df, estimator_name, window, lambda_param, symbol):
             st.metric("Maximum", f"{results['volatility'].max():.2f}%")
         
         # Plot
-        st.line_chart(results.set_index('date')['volatility'])
+        chart_data = results.set_index('date')['volatility']
+        # Downsample for better performance if too many data points
+        if len(chart_data) > 500:
+            chart_data.index = pd.to_datetime(chart_data.index)
+            chart_data = chart_data.resample('D').last()
+        st.line_chart(chart_data, use_container_width=True)
         
         # Data table
-        with st.expander("📋 View Data"):
+        with st.expander("View Data"):
             st.dataframe(results, use_container_width=True)
         
         # Download
         csv = results.to_csv(index=False)
         st.download_button(
-            label="📥 Download CSV",
+            label="Download CSV",
             data=csv,
             file_name=f"{symbol}_{estimator_name}_volatility.csv",
             mime="text/csv"
@@ -346,9 +463,144 @@ def run_single_estimator(df, estimator_name, window, lambda_param, symbol):
         st.error(f"Error: {str(e)}")
 
 
+def run_multi_stock_comparison(all_data, estimator_name, window, lambda_param, symbols):
+    """Run comparison across multiple stocks."""
+    st.header("Multi-Stock Comparison")
+    
+    try:
+        # Get estimator
+        if estimator_name == 'ewma':
+            estimator = get_estimator(estimator_name, window, 252, lambda_param=lambda_param)
+        else:
+            estimator = get_estimator(estimator_name, window, 252)
+        
+        # Calculate volatility for each stock
+        volatility_data = {}
+        for symbol, df in all_data.items():
+            try:
+                if df is None or len(df) == 0:
+                    st.warning(f"No data available for {symbol}")
+                    continue
+                
+                volatility = estimator.compute(df, annualize=True)
+                vol_df = pd.DataFrame({
+                    'date': df['date'],
+                    'volatility': volatility
+                }).dropna()
+                
+                if len(vol_df) == 0:
+                    st.warning(f"No volatility data calculated for {symbol} (insufficient data)")
+                    continue
+                    
+                volatility_data[symbol] = vol_df
+            except Exception as e:
+                st.warning(f"Failed to calculate volatility for {symbol}: {str(e)}")
+                import traceback
+                with st.expander(f"Error details for {symbol}"):
+                    st.code(traceback.format_exc())
+                continue
+        
+        if not volatility_data:
+            st.error("No volatility data calculated. Please check your data and try again.")
+            return
+        
+        # Combine all volatility series on common dates
+        combined_df = None
+        for symbol, vol_df in volatility_data.items():
+            # Ensure date is datetime for proper joining
+            vol_df_copy = vol_df.copy()
+            vol_df_copy['date'] = pd.to_datetime(vol_df_copy['date'])
+            vol_series = vol_df_copy.set_index('date')['volatility']
+            
+            if combined_df is None:
+                combined_df = pd.DataFrame({symbol: vol_series})
+            else:
+                combined_df = combined_df.join(vol_series.rename(symbol), how='outer')
+        
+        combined_df = combined_df.sort_index()
+        
+        # Check if we have any data after combining
+        if combined_df.empty:
+            st.error("No overlapping dates found between stocks. Cannot perform comparison.")
+            return
+        
+        # Summary Statistics
+        st.subheader("Summary Statistics")
+        stats_list = []
+        for symbol in combined_df.columns:
+            vol_series = combined_df[symbol].dropna()
+            if len(vol_series) > 0:
+                stats_list.append({
+                    'Stock': symbol,
+                    'Mean': vol_series.mean(),
+                    'Std': vol_series.std(),
+                    'Min': vol_series.min(),
+                    'Max': vol_series.max(),
+                    'Median': vol_series.median(),
+                    'Count': len(vol_series)
+                })
+        
+        if stats_list:
+            stats_df = pd.DataFrame(stats_list)
+            stats_df = stats_df.set_index('Stock')
+            st.dataframe(stats_df.style.format("{:.2f}"), use_container_width=True)
+        
+        # Correlation Matrix
+        st.subheader("Volatility Correlation Matrix")
+        if len(combined_df.columns) > 1:
+            # Calculate correlation only if we have at least 2 stocks
+            correlation = combined_df.corr()
+            st.dataframe(correlation.style.format("{:.4f}"), use_container_width=True)
+        else:
+            st.info("Correlation matrix requires at least 2 stocks.")
+        
+        # Volatility Comparison Chart
+        st.subheader("Volatility Comparison")
+        # Downsample for better performance if too many data points
+        if len(combined_df) > 500:
+            # Resample to daily if more than 500 points
+            combined_df_chart = combined_df.copy()
+            combined_df_chart.index = pd.to_datetime(combined_df_chart.index)
+            combined_df_chart = combined_df_chart.resample('D').last()
+        else:
+            combined_df_chart = combined_df
+        st.line_chart(combined_df_chart, use_container_width=True)
+        
+        # Individual Stock Metrics
+        st.subheader("Individual Stock Metrics")
+        if len(combined_df.columns) > 0:
+            cols = st.columns(len(combined_df.columns))
+            for idx, symbol in enumerate(combined_df.columns):
+                with cols[idx]:
+                    vol_series = combined_df[symbol].dropna()
+                    if len(vol_series) > 0:
+                        st.metric(
+                            symbol,
+                            f"{vol_series.mean():.2f}%",
+                            delta=f"Std: {vol_series.std():.2f}%"
+                        )
+                    else:
+                        st.metric(symbol, "N/A", delta="No data")
+        
+        # Download
+        csv = combined_df.reset_index().to_csv(index=False)
+        st.download_button(
+            label="Download Comparison CSV",
+            data=csv,
+            file_name=f"multi_stock_comparison_{estimator_name}.csv",
+            mime="text/csv"
+        )
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        import traceback
+        with st.expander("Error Details"):
+            st.code(traceback.format_exc())
+
+
 def run_comparison(df, window, lambda_param, symbol):
     """Run comparison of all estimators."""
-    st.header("🔀 Estimator Comparison")
+    st.header("Estimator Comparison")
     
     try:
         results = run_all_estimators(df, window, 252, lambda_param)
@@ -358,25 +610,36 @@ def run_comparison(df, window, lambda_param, symbol):
         stats = generate_comparison_statistics(results)
         stats_df = pd.DataFrame(stats).T
         stats_df.columns = ['Mean', 'Std', 'Min', 'Max', 'Count']
+        # Format estimator names in index
+        stats_df.index = [format_estimator_name(name) for name in stats_df.index]
         
         st.subheader("Summary Statistics")
         st.dataframe(stats_df.style.format("{:.2f}"), use_container_width=True)
         
         # Correlation Matrix
         correlation = calculate_correlation_matrix(results)
+        # Format estimator names in correlation matrix
+        correlation.index = [format_estimator_name(name) for name in correlation.index]
+        correlation.columns = [format_estimator_name(name) for name in correlation.columns]
         st.subheader("Correlation Matrix")
-        st.dataframe(correlation.style.format("{:.4f}").background_gradient(cmap='RdYlGn', vmin=-1, vmax=1), use_container_width=True)
+        st.dataframe(correlation.style.format("{:.4f}"), use_container_width=True)
         
         # Plot comparison
         st.subheader("Volatility Comparison")
         vol_cols = [col for col in results.columns if col != 'date']
         chart_data = results.set_index('date')[vol_cols]
-        st.line_chart(chart_data)
+        # Format column names for display
+        chart_data.columns = [format_estimator_name(col) for col in chart_data.columns]
+        # Downsample for better performance if too many data points
+        if len(chart_data) > 500:
+            chart_data.index = pd.to_datetime(chart_data.index)
+            chart_data = chart_data.resample('D').last()
+        st.line_chart(chart_data, use_container_width=True)
         
         # Download
         csv = results.to_csv(index=False)
         st.download_button(
-            label="📥 Download Comparison CSV",
+            label="Download Comparison CSV",
             data=csv,
             file_name=f"{symbol}_comparison.csv",
             mime="text/csv"
@@ -388,7 +651,7 @@ def run_comparison(df, window, lambda_param, symbol):
 
 def run_event_analysis(df, window, event_window, symbol):
     """Run event analysis."""
-    st.header("📅 Event Impact Analysis")
+    st.header("Event Impact Analysis")
     
     try:
         # Get estimator
@@ -436,13 +699,13 @@ def run_event_analysis(df, window, event_window, symbol):
         st.dataframe(top_events.style.format({'volatility_change_pct': '{:.2f}%'}), use_container_width=True)
         
         # Full results
-        with st.expander("📋 All Event Results"):
+        with st.expander("All Event Results"):
             st.dataframe(event_results, use_container_width=True)
         
         # Download
         csv = event_results.to_csv(index=False)
         st.download_button(
-            label="📥 Download Event Analysis CSV",
+            label="Download Event Analysis CSV",
             data=csv,
             file_name=f"{symbol}_event_analysis.csv",
             mime="text/csv"
@@ -454,7 +717,7 @@ def run_event_analysis(df, window, event_window, symbol):
 
 def run_predictions(df, window, event_window, symbol):
     """Run volatility predictions."""
-    st.header("🔮 Volatility Predictions")
+    st.header("Volatility Predictions")
     
     try:
         # Get estimator
@@ -514,7 +777,11 @@ def run_predictions(df, window, event_window, symbol):
         # Plot prediction
         st.subheader("Predicted Volatility Path")
         chart_data = predictions_df.set_index('date')[['predicted', 'lower_bound', 'upper_bound']]
-        st.line_chart(chart_data)
+        # Downsample for better performance if too many data points
+        if len(chart_data) > 500:
+            chart_data.index = pd.to_datetime(chart_data.index)
+            chart_data = chart_data.resample('D').last()
+        st.line_chart(chart_data, use_container_width=True)
         
         # Backtesting
         st.subheader("Backtesting Results")
@@ -535,7 +802,7 @@ def run_predictions(df, window, event_window, symbol):
         # Download
         csv = predictions_df.to_csv(index=False)
         st.download_button(
-            label="📥 Download Predictions CSV",
+            label="Download Predictions CSV",
             data=csv,
             file_name=f"{symbol}_predictions.csv",
             mime="text/csv"
@@ -547,16 +814,23 @@ def run_predictions(df, window, event_window, symbol):
 
 def run_full_analysis(df, window, lambda_param, event_window, symbol):
     """Run full analysis with all features."""
-    st.header("🎯 Full Analysis")
+    st.header("Full Analysis")
     
     # Comparison
     with st.spinner("Running estimator comparison..."):
         results = run_all_estimators(df, window, 252, lambda_param)
         results = results.dropna(how='all')
     
-    st.subheader("📊 Estimator Comparison")
+    st.subheader("Estimator Comparison")
     vol_cols = [col for col in results.columns if col != 'date']
-    st.line_chart(results.set_index('date')[vol_cols])
+    chart_data = results.set_index('date')[vol_cols]
+    # Format column names for display
+    chart_data.columns = [format_estimator_name(col) for col in chart_data.columns]
+    # Downsample for better performance if too many data points
+    if len(chart_data) > 500:
+        chart_data.index = pd.to_datetime(chart_data.index)
+        chart_data = chart_data.resample('D').last()
+    st.line_chart(chart_data, use_container_width=True)
     
     # Event Analysis
     with st.spinner("Running event analysis..."):
@@ -578,7 +852,7 @@ def run_full_analysis(df, window, lambda_param, event_window, symbol):
         )
         event_results = event_results.dropna(subset=['pre_vol', 'post_vol'])
     
-    st.subheader("📅 Event Impact Summary")
+    st.subheader("Event Impact Summary")
     if len(event_results) > 0:
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -613,11 +887,16 @@ def run_full_analysis(df, window, lambda_param, event_window, symbol):
                     similar, lookback_window=10
                 )
                 
-                st.subheader("🔮 Predictions")
-                st.line_chart(predictions_df.set_index('date')[['predicted', 'lower_bound', 'upper_bound']])
+                st.subheader("Predictions")
+                pred_chart = predictions_df.set_index('date')[['predicted', 'lower_bound', 'upper_bound']]
+                # Downsample for better performance if too many data points
+                if len(pred_chart) > 500:
+                    pred_chart.index = pd.to_datetime(pred_chart.index)
+                    pred_chart = pred_chart.resample('D').last()
+                st.line_chart(pred_chart, use_container_width=True)
     
     # Download all
-    st.subheader("📥 Downloads")
+    st.subheader("Downloads")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.download_button(

@@ -1,8 +1,8 @@
 # Volatility Estimator Stack
 
-I built this as a compact volatility analytics “workbench”: pull OHLC data, run multiple volatility estimators over configurable horizons, compare them side-by-side, and (optionally) look at event windows and simple pattern-based forecasts.
+Built this as a compact volatility analytics “workbench”: pull OHLC data, run multiple volatility estimators over configurable horizons, compare them side-by-side, and (optionally) look at event windows and simple pattern-based forecasts.
 
-It’s meant to be easy to explore interactively (Streamlit) but also usable from the command line for repeatable runs.
+Meant to be easy to explore interactively (Streamlit) but also usable from the command line for repeatable runs.
 
 ## What’s inside
 

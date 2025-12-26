@@ -91,54 +91,67 @@ def fetch_data(
 
 def validate_ohlc_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Validate OHLC data relationships and flag issues.
+    Validate and fix OHLC data relationships.
 
-    Validates:
+    Fixes:
     - High >= max(Open, Close)
     - Low <= min(Open, Close)
-    - All prices are positive
-    - No missing critical values
+    - Drops rows with missing critical values
+    - Drops rows with non-positive prices
 
     Args:
         df: DataFrame with OHLC columns
 
     Returns:
-        DataFrame with validated data (invalid rows may be flagged)
-
-    Raises:
-        ValidationError: If critical validation fails
+        DataFrame with validated and cleaned data
     """
-    if df.empty:
-        raise ValidationError("DataFrame is empty")
+    if df is None or df.empty:
+        return pd.DataFrame()
 
     required_cols = ['open', 'high', 'low', 'close']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
-        raise ValidationError(f"Missing required columns: {missing_cols}")
+        return pd.DataFrame()
 
-    # Check for missing values in critical columns
-    missing_count = df[required_cols].isna().sum().sum()
-    if missing_count > 0:
-        raise ValidationError(f"Found {missing_count} missing values in OHLC data")
+    # Make a copy to avoid modifying original
+    df = df.copy()
 
-    # Validate OHLC relationships
-    invalid_high = df['high'] < df[['open', 'close']].max(axis=1)
-    invalid_low = df['low'] > df[['open', 'close']].min(axis=1)
+    # Drop rows with missing values in critical columns instead of raising error
+    missing_mask = df[required_cols].isna().any(axis=1)
+    if missing_mask.sum() > 0:
+        df = df[~missing_mask].copy()
+    
+    if df.empty:
+        return pd.DataFrame()
 
-    invalid_rows = invalid_high | invalid_low
-
-    if invalid_rows.sum() > 0:
-        raise ValidationError(
-            f"Found {invalid_rows.sum()} rows with invalid OHLC relationships. "
-            f"High must be >= max(Open, Close) and Low must be <= min(Open, Close)"
-        )
-
-    # Check for non-positive prices
+    # Drop rows with non-positive prices instead of raising error
     non_positive = (df[required_cols] <= 0).any(axis=1)
     if non_positive.sum() > 0:
-        raise ValidationError(
-            f"Found {non_positive.sum()} rows with non-positive prices"
-        )
+        df = df[~non_positive].copy()
+    
+    if df.empty:
+        return pd.DataFrame()
+
+    # Fix OHLC relationships automatically
+    # High must be >= max(Open, Close)
+    max_oc = df[['open', 'close']].max(axis=1)
+    invalid_high = df['high'] < max_oc
+    if invalid_high.sum() > 0:
+        df.loc[invalid_high, 'high'] = max_oc[invalid_high]
+    
+    # Low must be <= min(Open, Close)
+    min_oc = df[['open', 'close']].min(axis=1)
+    invalid_low = df['low'] > min_oc
+    if invalid_low.sum() > 0:
+        df.loc[invalid_low, 'low'] = min_oc[invalid_low]
+    
+    # Ensure High >= Low
+    invalid_hl = df['high'] < df['low']
+    if invalid_hl.sum() > 0:
+        df.loc[invalid_hl, 'high'] = df.loc[invalid_hl, 'low']
+
+    # Reset index after dropping rows
+    df = df.reset_index(drop=True)
 
     return df
 
@@ -242,33 +255,52 @@ def get_market_data(
     """
     # Try to load from cache first
     if use_cache:
-        cached_df = load_from_cache(symbol, cache_dir, cache_format)
-        if cached_df is not None:
-            # Filter by date range if needed
-            cached_df['date'] = pd.to_datetime(cached_df['date'])
-            start = parse_date(start_date)
-            end = parse_date(end_date)
+        try:
+            cached_df = load_from_cache(symbol, cache_dir, cache_format)
+            if cached_df is not None and not cached_df.empty:
+                # Filter by date range if needed
+                cached_df['date'] = pd.to_datetime(cached_df['date'])
+                start = parse_date(start_date)
+                end = parse_date(end_date)
 
-            # Check if cached data covers the requested range
-            cached_start = cached_df['date'].min()
-            cached_end = cached_df['date'].max()
+                # Check if cached data covers the requested range
+                cached_start = cached_df['date'].min()
+                cached_end = cached_df['date'].max()
 
-            if cached_start <= start and cached_end >= end:
-                # Cache covers the range, filter and return
-                mask = (cached_df['date'] >= start) & (cached_df['date'] <= end)
-                filtered_df = cached_df[mask].copy()
-                filtered_df['date'] = filtered_df['date'].dt.date
-                return validate_ohlc_data(filtered_df)
+                if cached_start <= start and cached_end >= end:
+                    # Cache covers the range, filter and return
+                    mask = (cached_df['date'] >= start) & (cached_df['date'] <= end)
+                    filtered_df = cached_df[mask].copy()
+                    filtered_df['date'] = filtered_df['date'].dt.date
+                    validated_df = validate_ohlc_data(filtered_df)
+                    if validated_df is not None and not validated_df.empty:
+                        return validated_df
+        except Exception:
+            # If cache loading fails, continue to fetch from API
+            pass
 
     # Fetch from API
-    df = fetch_data(symbol, start_date, end_date, retry_attempts, rate_limit_delay)
+    try:
+        df = fetch_data(symbol, start_date, end_date, retry_attempts, rate_limit_delay)
+    except Exception as e:
+        raise DataError(f"Failed to fetch data for {symbol}: {str(e)}")
 
-    # Validate
+    if df is None or df.empty:
+        raise DataError(f"No data returned for {symbol}")
+
+    # Validate and fix data
     df = validate_ohlc_data(df)
+    
+    if df is None or df.empty:
+        raise DataError(f"No valid data after cleaning for {symbol}")
 
     # Save to cache
     if use_cache:
-        save_to_cache(df, symbol, cache_dir, cache_format)
+        try:
+            save_to_cache(df, symbol, cache_dir, cache_format)
+        except Exception:
+            # Cache save failure is non-critical, continue
+            pass
 
     return df
 
