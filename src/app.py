@@ -38,21 +38,24 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.comparison import (
+from src.analysis import (
     run_all_estimators,
     calculate_correlation_matrix,
-    generate_comparison_statistics
+    generate_comparison_statistics,
+    calculate_sharpe_ratio,
+    calculate_beta,
+    calculate_treynor_ratio,
+    calculate_max_drawdown,
 )
-from src.data_loader import get_market_data, get_implied_volatility
+from src.data import get_market_data, get_implied_volatility, calculate_returns
 from src.estimators import get_estimator, list_estimators
-from src.predictions import (
+from src.prediction import (
     is_deep_learning_available,
     predict_volatility_dl,
     predict_neural_garch,
     analyze_fed_rate_scenario,
 )
-from src.returns import calculate_returns
-from src.forecast_visualization import (
+from src.visualization import (
     calculate_historical_volatility,
     classify_volatility_regime,
     calculate_historical_averages,
@@ -63,6 +66,7 @@ from src.forecast_visualization import (
     calculate_forecast_statistics,
     calculate_y_axis_range,
     clean_series_for_plotly,
+    create_forecast_chart,
 )
 
 # Check deep learning availability
@@ -408,55 +412,6 @@ def load_config(config_path: str = 'config.yaml') -> dict:
 def format_estimator_name(name: str) -> str:
     """Format estimator name for display."""
     return name.replace('_', ' ').title()
-
-
-def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
-    """Calculate Sharpe ratio."""
-    if len(returns) == 0 or returns.std() == 0:
-        return 0.0
-    excess_returns = returns.mean() - risk_free_rate / 252  # Daily risk-free rate
-    return (excess_returns / returns.std()) * np.sqrt(252)  # Annualized
-
-
-def calculate_treynor_ratio(returns: pd.Series, beta: float, risk_free_rate: float = 0.0) -> float:
-    """Calculate Treynor ratio."""
-    if beta == 0:
-        return 0.0
-    excess_returns = returns.mean() - risk_free_rate / 252
-    return (excess_returns / beta) * 252  # Annualized
-
-
-def calculate_beta(asset_returns: pd.Series, market_returns: pd.Series) -> float:
-    """Calculate beta relative to market."""
-    if len(asset_returns) == 0 or len(market_returns) == 0:
-        return 0.0
-    # Align indices
-    common_idx = asset_returns.index.intersection(market_returns.index)
-    if len(common_idx) < 2:
-        return 0.0
-    asset_aligned = asset_returns.loc[common_idx]
-    market_aligned = market_returns.loc[common_idx]
-    # Remove NaN
-    valid = ~(asset_aligned.isna() | market_aligned.isna())
-    if valid.sum() < 2:
-        return 0.0
-    asset_clean = asset_aligned[valid]
-    market_clean = market_aligned[valid]
-    if market_clean.var() == 0:
-        return 0.0
-    covariance = np.cov(asset_clean, market_clean)[0, 1]
-    market_variance = market_clean.var()
-    return covariance / market_variance
-
-
-def calculate_max_drawdown(returns: pd.Series) -> float:
-    """Calculate maximum drawdown."""
-    if len(returns) == 0:
-        return 0.0
-    cumulative = (1 + returns).cumprod()
-    running_max = cumulative.expanding().max()
-    drawdown = (cumulative - running_max) / running_max
-    return drawdown.min() * 100  # Return as percentage
 
 
 def calculate_volatility_stats(volatility: pd.Series) -> dict:
@@ -816,12 +771,95 @@ def render_single_asset_forecasting():
         forecast_type_display = st.session_state.get('forecast_type', 'itransformer')
         horizon_display = st.session_state.get('forecast_horizon', 20)
         
-        # Calculate historical volatility for context
-        try:
-            hist_vol = calculate_historical_volatility(df, window=20, method='yang_zhang')
-        except:
-            hist_vol = pd.Series(dtype=float)
+        # Calculate historical volatility for context using Black-Scholes implied volatility
+        symbol = st.session_state.get('forecast_symbol', '').upper()
+        horizon_display = st.session_state.get('forecast_horizon', 20)
         
+        try:
+            # Use Black-Scholes implied volatility for estimation
+            hist_vol = calculate_historical_volatility(
+                df, 
+                window=20, 
+                method='yang_zhang',
+                use_implied_vol=True,
+                symbol=symbol,
+                horizon_days=horizon_display
+            )
+            
+            # Ensure we have data and proper index
+            if len(hist_vol) == 0:
+                # Final fallback: calculate simple rolling volatility from returns to show fluctuation
+                try:
+                    from src.data.returns import calculate_returns
+                    returns = calculate_returns(df)
+                    hist_vol = returns.rolling(window=20).std() * np.sqrt(252)
+                    
+                    # Try to calibrate to current IV if available
+                    try:
+                        # symbol is already defined at line 775
+                        current_iv = get_implied_volatility(symbol, df, horizon_days=horizon_display, use_api=True)
+                        if current_iv is not None and len(hist_vol.dropna()) > 0:
+                            current_iv_decimal = current_iv / 100.0
+                            current_realized = hist_vol.dropna().iloc[-1]
+                            if current_realized > 0:
+                                calibration_factor = current_iv_decimal / current_realized
+                                hist_vol = hist_vol * calibration_factor
+                    except:
+                        pass
+                except:
+                    # Absolute final fallback: calculate from close prices
+                    try:
+                        close_prices = df['close']
+                        returns = np.log(close_prices / close_prices.shift(1))
+                        hist_vol = returns.rolling(window=20).std() * np.sqrt(252)
+                    except:
+                        hist_vol = pd.Series(dtype=float)
+            
+            # Ensure the index is datetime if df has date column
+            if 'date' in df.columns and not isinstance(hist_vol.index, pd.DatetimeIndex):
+                hist_vol.index = pd.to_datetime(df['date'].iloc[:len(hist_vol)])
+            elif not isinstance(hist_vol.index, pd.DatetimeIndex) and len(hist_vol) > 0:
+                # Create date index from df if available
+                if 'date' in df.columns:
+                    hist_vol.index = pd.to_datetime(df['date'].iloc[:len(hist_vol)])
+                else:
+                    # Use df index if it's datetime
+                    hist_vol.index = df.index[:len(hist_vol)]
+        except Exception as e:
+            # Fallback: calculate simple rolling volatility from returns to show fluctuation
+            try:
+                from src.data.returns import calculate_returns
+                returns = calculate_returns(df)
+                hist_vol = returns.rolling(window=20).std() * np.sqrt(252)
+                
+                # Try to calibrate to current IV if available
+                try:
+                    # symbol is already defined at line 775
+                    current_iv = get_implied_volatility(symbol, df, horizon_days=horizon_display, use_api=True)
+                    if current_iv is not None and len(hist_vol.dropna()) > 0:
+                        current_iv_decimal = current_iv / 100.0
+                        current_realized = hist_vol.dropna().iloc[-1]
+                        if current_realized > 0:
+                            calibration_factor = current_iv_decimal / current_realized
+                            hist_vol = hist_vol * calibration_factor
+                except:
+                    pass
+                
+                # Set index from df
+                if 'date' in df.columns:
+                    hist_vol.index = pd.to_datetime(df['date'].iloc[:len(hist_vol)])
+                else:
+                    hist_vol.index = df.index[:len(hist_vol)]
+            except:
+                # Absolute final fallback
+                try:
+                    close_prices = df['close']
+                    returns = np.log(close_prices / close_prices.shift(1))
+                    hist_vol = returns.rolling(window=20).std() * np.sqrt(252)
+                    if 'date' in df.columns:
+                        hist_vol.index = pd.to_datetime(df['date'].iloc[:len(hist_vol)])
+                except:
+                    hist_vol = pd.Series(dtype=float)
         # Get implied volatility matching forecast horizon
         symbol = st.session_state.get('forecast_symbol', '').upper()
         current_vol = get_implied_volatility(symbol, df, horizon_days=horizon_display, use_api=True)
@@ -835,6 +873,13 @@ def render_single_asset_forecasting():
             results = result['results']
             baseline_vol = results.get('baseline_volatility', 0)
             scenario_vol = results.get('scenario_volatility', 0)
+            
+            # Debug: Check if values are actually different
+            if abs(baseline_vol - scenario_vol) < 0.01:  # Less than 0.01% difference
+                # Values are too close - might indicate model issue
+                fed_rate_change = st.session_state.get('fed_rate_change', 0)
+                if fed_rate_change != 0:
+                    st.warning(f"⚠️ Baseline and scenario forecasts are very similar ({baseline_vol:.2f}% vs {scenario_vol:.2f}%). The model may not be sensitive to Fed rate changes, or the change ({fed_rate_change} bps) may be too small to affect volatility.")
             
             # Use implied volatility for current volatility (matching forecast horizon)
             # This should remain constant regardless of Fed rate changes
@@ -857,105 +902,148 @@ def render_single_asset_forecasting():
                 st.metric("Forecast Regime", regime)
             
             # Fed Rate Scenario Comparison Chart
-            if PLOTLY_AVAILABLE and len(hist_vol) > 0:
+            if not PLOTLY_AVAILABLE:
+                st.warning("Plotly required for charts. Install with: pip install plotly")
+            elif len(hist_vol) == 0:
+                st.warning("Unable to calculate historical volatility for chart display.")
+            else:
+                # Convert historical volatility from decimal to percentage
+                hist_vol_pct = hist_vol * 100
                 # Prepare data
-                hist_vol_recent = hist_vol.iloc[-90:] if len(hist_vol) >= 90 else hist_vol
+                hist_vol_recent = hist_vol_pct.iloc[-90:] if len(hist_vol_pct) >= 90 else hist_vol_pct
                 hist_x, hist_y = clean_series_for_plotly(hist_vol_recent)
                 
                 if hist_x:
-                    last_date = pd.to_datetime(hist_x[-1])
-                    
-                    # Forecast dates
-                    forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_display, freq='D')
-                    
-                    fig = go.Figure()
-                    
-                    # Historical volatility
-                    fig.add_trace(go.Scatter(
-                        x=hist_x,
-                        y=hist_y,
-                        mode='lines',
-                        name='Historical Volatility',
-                        line=dict(color='#000000', width=1.5)
-                    ))
-                    
-                    # Current marker
-                    fig.add_trace(go.Scatter(
-                        x=[hist_x[-1]],
-                        y=[hist_y[-1]],
-                        mode='markers',
-                        name='Current',
-                        marker=dict(color='#000000', size=10, symbol='circle')
-                    ))
-                    
-                    # Ensure forecast values are not NaN
-                    b_vol = baseline_vol if not (pd.isna(baseline_vol) or np.isnan(baseline_vol)) else hist_y[-1]
-                    s_vol = scenario_vol if not (pd.isna(scenario_vol) or np.isnan(scenario_vol)) else b_vol
-                    
-                    # Baseline forecast
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=[b_vol] * len(forecast_dates),
-                        mode='lines',
-                        name='Baseline Forecast',
-                        line=dict(color='#666666', width=2, dash='dash')
-                    ))
-                    
-                    # Scenario forecast
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=[s_vol] * len(forecast_dates),
-                        mode='lines',
-                        name='Scenario Forecast',
-                        line=dict(color='#333333', width=2, dash='dot')
-                    ))
-                    
-                    # Impact shading
-                    fig.add_trace(go.Scatter(
-                        x=list(forecast_dates) + list(forecast_dates[::-1]),
-                        y=[b_vol] * len(forecast_dates) + [s_vol] * len(forecast_dates),
-                        fill='toself',
-                        fillcolor='rgba(100,100,100,0.2)',
-                        line=dict(color='rgba(255,255,255,0)'),
-                        name='Impact Area',
-                        showlegend=True
-                    ))
-                    
-                    # Vertical separator
-                    fig.add_vline(
-                        x=last_date,
-                        line_dash="dot",
-                        line_color="#999999",
-                        line_width=1
-                    )
-                    
-                    # Fed rate annotation
-                    fed_rate_change = st.session_state.get('fed_rate_change', 0)
-                    if fed_rate_change != 0:
-                        fig.add_annotation(
-                            x=forecast_dates[len(forecast_dates)//2],
-                            y=max(b_vol, s_vol) * 1.1,
-                            text=f"Fed Rate: {fed_rate_change:+.0f} bps",
-                            showarrow=False,
-                            font=dict(color='#000000', size=10)
+                    try:
+                        # Normalize x-axis: today - forecast_horizon to today + forecast_horizon
+                        today = pd.Timestamp.today().normalize()
+                        x_axis_start = today - pd.Timedelta(days=horizon_display)
+                        x_axis_end = today + pd.Timedelta(days=horizon_display)
+                        
+                        # Filter historical data to x_axis_start to today
+                        hist_vol_pct.index = pd.to_datetime(hist_vol_pct.index)
+                        hist_vol_filtered = hist_vol_pct[(hist_vol_pct.index >= x_axis_start) & (hist_vol_pct.index <= today)]
+                        
+                        # If we don't have enough historical data, pad with the earliest available value
+                        if len(hist_vol_filtered) < horizon_display:
+                            earliest_value = hist_vol_pct.iloc[0] if len(hist_vol_pct) > 0 else 0
+                            padding_dates = pd.date_range(start=x_axis_start, end=hist_vol_filtered.index[0] - pd.Timedelta(days=1), freq='D') if len(hist_vol_filtered) > 0 else pd.date_range(start=x_axis_start, end=today, freq='D')
+                            padding_series = pd.Series([earliest_value] * len(padding_dates), index=padding_dates)
+                            hist_vol_filtered = pd.concat([padding_series, hist_vol_filtered]).sort_index()
+                        
+                        # Ensure historical data extends exactly to today (the separator line)
+                        # If the last point is not exactly at today, add it using the last available value
+                        if len(hist_vol_filtered) > 0:
+                            last_date = hist_vol_filtered.index[-1]
+                            if last_date < today:
+                                # Add today's point using the last available value to extend to the separator line
+                                last_value = hist_vol_filtered.iloc[-1]
+                                hist_vol_filtered = pd.concat([hist_vol_filtered, pd.Series([last_value], index=[today])])
+                            elif last_date > today:
+                                # If somehow we have data beyond today, trim it
+                                hist_vol_filtered = hist_vol_filtered[hist_vol_filtered.index <= today]
+                        else:
+                            # If no historical data, create a single point at today
+                            hist_vol_filtered = pd.Series([0], index=[today])
+                        
+                        hist_x, hist_y = clean_series_for_plotly(hist_vol_filtered)
+                        today_date = today
+                        
+                        # Forecast dates from today to today+horizon_display (includes today for seamless connection)
+                        forecast_dates = pd.date_range(start=today_date, periods=horizon_display + 1, freq='D')
+                        
+                        fig = go.Figure()
+                        
+                        # Historical volatility
+                        fig.add_trace(go.Scatter(
+                            x=hist_x,
+                            y=hist_y,
+                            mode='lines',
+                            name='Historical Volatility',
+                            line=dict(color='#000000', width=1.5)
+                        ))
+                        
+                        # Current marker
+                        fig.add_trace(go.Scatter(
+                            x=[hist_x[-1]],
+                            y=[hist_y[-1]],
+                            mode='markers',
+                            name='Current',
+                            marker=dict(color='#000000', size=10, symbol='circle')
+                        ))
+                        
+                        # Ensure forecast values are not NaN
+                        s_vol = scenario_vol if not (pd.isna(scenario_vol) or np.isnan(scenario_vol)) else hist_y[-1]
+                        
+                        # Generate fluctuating forecast path for scenario only
+                        from src.visualization.forecast_viz import generate_forecast_path
+                        start_vol = hist_y[-1] if len(hist_y) > 0 else s_vol
+                        
+                        # Scenario forecast path - make it more volatile, starting from today (no gap)
+                        scenario_path = generate_forecast_path(
+                            start_value=start_vol,
+                            end_value=s_vol,
+                            horizon=horizon_display + 1,  # +1 to include today for seamless connection
+                            volatility=max(0.5, abs(s_vol - start_vol) * 0.5),  # Increased volatility for more fluctuation
+                            mean_reversion=0.1  # Reduced mean reversion for more natural movement
                         )
-                    
-                    # Calculate y-axis range to show all data
-                    y_min, y_max = calculate_y_axis_range(hist_y + [b_vol, s_vol])
-                    
-                    fig.update_layout(
-                        title="",
-                        xaxis_title="",
-                        yaxis_title="Volatility (%)",
-                        yaxis=dict(range=[y_min, y_max]),
-                        plot_bgcolor='white',
-                        paper_bgcolor='white',
-                        font=dict(color='black', size=11),
-                        margin=dict(l=40, r=20, t=20, b=40),
-                        hovermode='x unified',
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                        # Ensure first point exactly matches last historical point for seamless connection
+                        if len(scenario_path) > 0 and len(hist_y) > 0:
+                            scenario_path[0] = start_vol
+                        
+                        # Scenario forecast only (baseline removed)
+                        # Use all points including today to connect seamlessly with historical data
+                        fig.add_trace(go.Scatter(
+                            x=forecast_dates,
+                            y=scenario_path,
+                            mode='lines',
+                            name='Scenario Forecast',
+                            line=dict(color='#333333', width=2, dash='dot')
+                        ))
+                        
+                        # Vertical separator at today (middle of x-axis)
+                        fig.add_vline(
+                            x=today_date,
+                            line_dash="dot",
+                            line_color="#999999",
+                            line_width=1
+                        )
+                        
+                        # Fed rate annotation
+                        fed_rate_change = st.session_state.get('fed_rate_change', 0)
+                        if fed_rate_change != 0:
+                            fig.add_annotation(
+                                x=forecast_dates[len(forecast_dates)//2],
+                                y=s_vol * 1.1,
+                                text=f"Fed Rate: {fed_rate_change:+.0f} bps",
+                                showarrow=False,
+                                font=dict(color='#000000', size=10)
+                            )
+                        
+                        # Calculate y-axis range to show all data
+                        y_min, y_max = calculate_y_axis_range(hist_y + scenario_path)
+                        
+                        fig.update_layout(
+                            title="",
+                            xaxis_title="",
+                            yaxis_title="Volatility (%)",
+                            yaxis=dict(range=[y_min, y_max]),
+                            xaxis=dict(range=[x_axis_start, x_axis_end]),
+                            plot_bgcolor='white',
+                            paper_bgcolor='white',
+                            font=dict(color='black', size=11),
+                            margin=dict(l=40, r=20, t=20, b=40),
+                            hovermode='x unified',
+                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating Fed Rate scenario chart: {str(e)}")
+                        with st.expander("Error Details"):
+                            import traceback
+                            st.code(traceback.format_exc())
+                else:
+                    st.warning("No historical data available for chart display.")
             
             # Statistical Summary Table
             with st.expander("Statistical Summary", expanded=False):
@@ -1006,7 +1094,6 @@ def render_single_asset_forecasting():
             if st.button("Download Forecast", type="primary"):
                 export_df = pd.DataFrame({
                     'Date': forecast_dates,
-                    'Baseline_Forecast': [baseline_vol] * len(forecast_dates),
                     'Scenario_Forecast': [scenario_vol] * len(forecast_dates),
                     'Impact': [impact] * len(forecast_dates)
                 })
@@ -1052,110 +1139,40 @@ def render_single_asset_forecasting():
                 change = main_forecast - current_vol
                 st.metric("Change", f"{change:+.2f}%", delta=f"{change:+.2f}%")
             with col4:
-                regime, _ = classify_volatility_regime(main_forecast, hist_vol)
-                alert_level, _ = get_alert_level(main_forecast, hist_vol)
+                # Convert hist_vol to percentage for regime classification
+                hist_vol_pct_for_regime = hist_vol * 100 if len(hist_vol) > 0 else pd.Series(dtype=float)
+                regime, _ = classify_volatility_regime(main_forecast, hist_vol_pct_for_regime)
+                alert_level, _ = get_alert_level(main_forecast, hist_vol_pct_for_regime)
                 st.metric("Forecast Regime", regime)
             
             # Forecast Chart
-            if PLOTLY_AVAILABLE and len(hist_vol) > 0:
-                hist_vol_recent = hist_vol.iloc[-90:] if len(hist_vol) >= 90 else hist_vol
-                hist_x, hist_y = clean_series_for_plotly(hist_vol_recent)
+            if not PLOTLY_AVAILABLE:
+                st.warning("Plotly required for charts. Install with: pip install plotly")
+            elif len(hist_vol) == 0:
+                st.warning("Unable to calculate historical volatility for chart display.")
+            else:
+                # Convert historical volatility from decimal to percentage
+                hist_vol_pct = hist_vol * 100
                 
-                if hist_x:
-                    last_date = pd.to_datetime(hist_x[-1])
-                    fig = go.Figure()
-                    
-                    # Historical volatility
-                    fig.add_trace(go.Scatter(
-                        x=hist_x,
-                        y=hist_y,
-                        mode='lines',
-                        name='Historical Volatility',
-                        line=dict(color='#000000', width=1.5)
-                    ))
-                    
-                    # Current marker
-                    fig.add_trace(go.Scatter(
-                        x=[hist_x[-1]],
-                        y=[hist_y[-1]],
-                        mode='markers',
-                        name='Current',
-                        marker=dict(color='#000000', size=10, symbol='circle')
-                    ))
-                    
-                    # Forecast line
-                    forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_display, freq='D')
-                    # Ensure main_forecast is not NaN
-                    m_forecast = main_forecast if not (pd.isna(main_forecast) or np.isnan(main_forecast)) else hist_y[-1]
-                    
-                    fig.add_trace(go.Scatter(
-                        x=forecast_dates,
-                        y=[m_forecast] * len(forecast_dates),
-                        mode='lines',
-                        name=f'{horizon_display}d Forecast',
-                        line=dict(color='#666666', width=2, dash='dash')
-                    ))
-                    
-                    # Add confidence intervals
-                    conf_intervals = estimate_confidence_intervals(m_forecast, hist_vol)
-                    c_low = conf_intervals['lower']
-                    c_high = conf_intervals['upper']
-                    
-                    fig.add_trace(go.Scatter(
-                        x=list(forecast_dates) + list(forecast_dates[::-1]),
-                        y=[c_low] * len(forecast_dates) + [c_high] * len(forecast_dates),
-                        fill='toself',
-                        fillcolor=f'rgba(100,100,100,0.2)',
-                        line=dict(color='rgba(255,255,255,0)'),
-                        name=f'{horizon_display}d 95% CI',
-                        showlegend=True
-                    ))
-                    
-                    # Vertical separator
-                    fig.add_vline(
-                        x=last_date,
-                        line_dash="dot",
-                        line_color="#999999",
-                        line_width=1
-                    )
-                    
-                    # Volatility regime zones
-                    vol_min_data = min(hist_y + [m_forecast, c_low])
-                    vol_max_data = max(hist_y + [m_forecast, c_high])
-                    vol_range_data = vol_max_data - vol_min_data
-                    
-                    # Add horizontal zones
-                    fig.add_hrect(
-                        y0=vol_min_data,
-                        y1=vol_min_data + vol_range_data / 3,
-                        fillcolor="rgba(200,200,200,0.1)",
-                        layer="below", line_width=0,
-                        annotation_text="Low", annotation_position="left"
-                    )
-                    fig.add_hrect(
-                        y0=vol_min_data + 2 * vol_range_data / 3,
-                        y1=vol_max_data,
-                        fillcolor="rgba(200,200,200,0.1)",
-                        layer="below", line_width=0,
-                        annotation_text="High", annotation_position="left"
-                    )
-                    
-                    # Calculate y-axis range
-                    y_min, y_max = calculate_y_axis_range(hist_y + [m_forecast, c_low, c_high])
-                    
-                    fig.update_layout(
-                        title="",
-                        xaxis_title="",
-                        yaxis_title="Volatility (%)",
-                        yaxis=dict(range=[y_min, y_max]),
-                        plot_bgcolor='white',
-                        paper_bgcolor='white',
-                        font=dict(color='black', size=11),
-                        margin=dict(l=40, r=20, t=20, b=40),
-                        hovermode='x unified',
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                # Calculate confidence intervals (using percentage values)
+                conf_intervals = estimate_confidence_intervals(main_forecast, hist_vol_pct)
+                
+                # Create forecast chart using visualization function
+                try:
+                    fig = create_forecast_chart(
+                        historical_volatility=hist_vol_pct,
+                        forecast_value=main_forecast,
+                        forecast_horizon=horizon_display,
+                        confidence_intervals=conf_intervals,
+                        historical_days=90,
+                        title=""
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error creating forecast chart: {str(e)}")
+                    with st.expander("Error Details"):
+                        import traceback
+                        st.code(traceback.format_exc())
             
             # Statistical Summary Table
             with st.expander("Statistical Summary", expanded=False):
@@ -1272,6 +1289,18 @@ def render_single_asset_forecasting():
                     # Fallback to result's current_volatility if IV unavailable
                     current_vol = result.get('current_volatility', 0)
                 
+                # Get forecast dates for export
+                if 'date' in forecast_df.columns:
+                    forecast_dates = pd.to_datetime(forecast_df['date']).tolist()
+                else:
+                    # Generate forecast dates from last historical date
+                    vol_df = result['volatility']
+                    if len(vol_df) > 0:
+                        last_date = pd.to_datetime(vol_df['date'].iloc[-1])
+                        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=len(forecast_df), freq='D').tolist()
+                    else:
+                        forecast_dates = []
+                
                 # Key Metrics Dashboard
                 st.subheader("Key Metrics")
                 col1, col2, col3, col4 = st.columns(4)
@@ -1295,6 +1324,11 @@ def render_single_asset_forecasting():
                     hist_vol_recent = hist_vol_series.iloc[-90:] if len(hist_vol_series) >= 90 else hist_vol_series
                     hist_x, hist_y = clean_series_for_plotly(hist_vol_recent)
                     
+                    # Calculate confidence intervals (needed for both chart and export)
+                    conf_intervals = estimate_confidence_intervals(forecasted_vol, hist_vol_series)
+                    c_low = conf_intervals['lower']
+                    c_high = conf_intervals['upper']
+                    
                     if hist_x:
                         fig = go.Figure()
                         
@@ -1316,8 +1350,29 @@ def render_single_asset_forecasting():
                             marker=dict(color='#000000', size=10, symbol='circle')
                         ))
                         
-                        # Forecast
-                        f_x, f_y = clean_series_for_plotly(pd.Series(forecast_df['volatility'].values, index=pd.to_datetime(forecast_df['date'])))
+                        # Forecast - use daily values from forecast_df
+                        if 'date' in forecast_df.columns and len(forecast_df) > 0:
+                            forecast_series = pd.Series(forecast_df['volatility'].values, index=pd.to_datetime(forecast_df['date']))
+                            f_x, f_y = clean_series_for_plotly(forecast_series)
+                            # Ensure last value matches forecasted_vol
+                            if len(f_y) > 0 and forecasted_vol is not None:
+                                f_y[-1] = forecasted_vol
+                        else:
+                            # Generate dates if not present and create fluctuating path
+                            last_hist_date = pd.to_datetime(hist_x[-1]) if hist_x else pd.Timestamp.today()
+                            forecast_dates_for_chart = pd.date_range(start=last_hist_date + pd.Timedelta(days=1), periods=horizon_display, freq='D')
+                            from src.visualization.forecast_viz import generate_forecast_path
+                            start_vol = hist_y[-1] if len(hist_y) > 0 else forecasted_vol
+                            forecast_path = generate_forecast_path(
+                                start_value=start_vol,
+                                end_value=forecasted_vol if forecasted_vol is not None else start_vol,
+                                horizon=horizon_display,
+                                volatility=abs((forecasted_vol if forecasted_vol is not None else start_vol) - start_vol) * 0.15 / horizon_display if horizon_display > 0 else 0.02,
+                                mean_reversion=0.15
+                            )
+                            f_x = forecast_dates_for_chart.tolist()
+                            f_y = forecast_path
+                        
                         if f_x:
                             fig.add_trace(go.Scatter(
                                 x=f_x,
@@ -1326,11 +1381,6 @@ def render_single_asset_forecasting():
                                 name=f'{horizon_display}-Day Forecast',
                                 line=dict(color='#666666', width=2, dash='dash')
                             ))
-                            
-                            # Confidence intervals
-                            conf_intervals = estimate_confidence_intervals(forecasted_vol, hist_vol_series)
-                            c_low = conf_intervals['lower']
-                            c_high = conf_intervals['upper']
                             
                             fig.add_trace(go.Scatter(
                                 x=list(f_x) + list(f_x[::-1]),
@@ -1706,12 +1756,11 @@ def render_asset_comparison_risk_return():
     sharpe_b = calculate_sharpe_ratio(returns_b)
     
     # Treynor ratio
-    treynor_a = calculate_treynor_ratio(returns_a, beta_a) if beta_a != 0 else 0.0
-    treynor_b = calculate_treynor_ratio(returns_b, beta_b) if beta_b != 0 else 0.0
+    treynor_a = calculate_treynor_ratio(returns_a, returns_bench) if returns_bench is not None and beta_a != 0 else 0.0
+    treynor_b = calculate_treynor_ratio(returns_b, returns_bench) if returns_bench is not None and beta_b != 0 else 0.0
     
-    # Max drawdown
-    max_dd_a = calculate_max_drawdown(returns_a)
-    max_dd_b = calculate_max_drawdown(returns_b)
+    max_dd_a = calculate_max_drawdown(df_a['close'])
+    max_dd_b = calculate_max_drawdown(df_b['close'])
     
     # Metrics table
     metrics_df = pd.DataFrame({
@@ -1884,43 +1933,6 @@ def render_asset_comparison_forecast():
 
 def main():
     """Main application entry point."""
-    # Use components.v1.html for higher priority CSS injection
-    try:
-        import streamlit.components.v1 as components
-        components.html("""
-        <style>
-        /* Ultra-aggressive CSS to remove red underlines */
-        [data-baseweb="tab"][aria-selected="true"],
-        button[data-baseweb="tab"][aria-selected="true"] {
-            border-bottom: 0px !important;
-            box-shadow: none !important;
-            -webkit-box-shadow: none !important;
-            -moz-box-shadow: none !important;
-            outline: none !important;
-        }
-        [data-baseweb="tab"][aria-selected="true"] * {
-            border-bottom: 0px !important;
-            box-shadow: none !important;
-        }
-        </style>
-        <script>
-        (function() {
-            function removeRed() {
-                document.querySelectorAll('[data-baseweb="tab"][aria-selected="true"]').forEach(el => {
-                    el.style.cssText += 'border-bottom: 0px !important; box-shadow: none !important;';
-                    Array.from(el.querySelectorAll('*')).forEach(child => {
-                        child.style.cssText += 'border-bottom: 0px !important; box-shadow: none !important;';
-                    });
-                });
-            }
-            setInterval(removeRed, 10);
-            removeRed();
-        })();
-        </script>
-        """, height=0)
-    except:
-        pass
-    
     st.title("Volatility Estimator")
     
     # Top-level navigation

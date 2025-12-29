@@ -7,56 +7,47 @@ This package contains implementations of various volatility estimators:
 - Parkinson: Range-based estimator using high/low
 - Rogers-Satchell: Range-based estimator accounting for drift
 - Yang-Zhang: Comprehensive range-based estimator
+- Neural GARCH: Neural network-based conditional variance estimation
 """
 
+from src.estimators.base import BaseEstimator as VolatilityEstimator
 from src.estimators.close_to_close import CloseToCloseEstimator
 from src.estimators.ewma import EWMAEstimator
 from src.estimators.parkinson import ParkinsonEstimator
 from src.estimators.rogers_satchell import RogersSatchellEstimator
 from src.estimators.yang_zhang import YangZhangEstimator
+from src.estimators.factory import (
+    get_estimator,
+    list_estimators,
+    register_estimator,
+    ESTIMATORS,
+)
 
-# Estimator registry
-ESTIMATORS = {
-    'close_to_close': CloseToCloseEstimator,
-    'ewma': EWMAEstimator,
-    'parkinson': ParkinsonEstimator,
-    'rogers_satchell': RogersSatchellEstimator,
-    'yang_zhang': YangZhangEstimator,
-}
-
-
-def get_estimator(name: str, window: int = 60, annualization_factor: int = 252, **kwargs):
-    """
-    Factory function to get estimator instance.
-
-    Args:
-        name: Estimator name (must be in ESTIMATORS registry)
-        window: Rolling window size
-        annualization_factor: Days per year
-        **kwargs: Additional estimator-specific parameters (e.g., lambda for EWMA)
-
-    Returns:
-        Estimator instance
-
-    Raises:
-        ValueError: If estimator name is not found
-    """
-    if name not in ESTIMATORS:
-        available = ', '.join(ESTIMATORS.keys())
-        raise ValueError(
-            f"Unknown estimator: {name}. Available estimators: {available}"
-        )
-
-    estimator_class = ESTIMATORS[name]
-    return estimator_class(window=window, annualization_factor=annualization_factor, **kwargs)
+# Neural GARCH import (optional - requires PyTorch)
+try:
+    from src.estimators.neural_garch import NeuralGARCHEstimator
+    _NEURAL_GARCH_AVAILABLE = True
+except ImportError:
+    NeuralGARCHEstimator = None
+    _NEURAL_GARCH_AVAILABLE = False
 
 
-def list_estimators():
-    """
-    List all available estimator names.
+def is_neural_garch_available() -> bool:
+    """Check if Neural GARCH estimator is available."""
+    return _NEURAL_GARCH_AVAILABLE
 
-    Returns:
-        List of estimator names
-    """
-    return list(ESTIMATORS.keys())
 
+__all__ = [
+    'VolatilityEstimator',
+    'CloseToCloseEstimator',
+    'EWMAEstimator',
+    'ParkinsonEstimator',
+    'RogersSatchellEstimator',
+    'YangZhangEstimator',
+    'NeuralGARCHEstimator',
+    'get_estimator',
+    'list_estimators',
+    'register_estimator',
+    'is_neural_garch_available',
+    'ESTIMATORS',
+]

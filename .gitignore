@@ -66,4 +66,18 @@ Thumbs.db
 .coverage
 htmlcov/
 .tox/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Models and checkpoints
+models/checkpoints/*.pt
+models/checkpoints/*.pth
+models/checkpoints/*.ckpt
+!models/checkpoints/.gitkeep
+
+# Scripts backup files
+scripts/*.backup
+scripts/*.sh.bak
 

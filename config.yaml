@@ -14,7 +14,7 @@ data:
 
 # Volatility Estimation Configuration
 volatility:
-  default_estimator: yang_zhang  # Best overall estimator
+  default_estimator: yang_zhang  # Best overall traditional estimator
   default_window: 60              # Trading days
   ewma_lambda: 0.94               # RiskMetrics standard
   annualization_factor: 252       # Trading days per year
@@ -51,4 +51,107 @@ logging:
   level: INFO           # DEBUG, INFO, WARNING, ERROR, CRITICAL
   file: ./logs/volatility_estimator.log
   console: true
+
+# ============================================================================
+# Deep Learning Configuration
+# ============================================================================
+
+deep_learning:
+  # Device configuration
+  device: auto           # auto, cuda, mps, cpu
+  batch_size: 64
+  num_workers: 4
+  mixed_precision: true  # Use FP16 for faster training on GPU
+  seed: 42               # Random seed for reproducibility
+  
+  # Model checkpoints
+  checkpoint_dir: ./models/checkpoints
+  save_best_only: true
+
+# Volatility Predictor (iTransformer)
+volatility_predictor:
+  model_type: itransformer  # itransformer or transformer
+  d_model: 128              # Model dimension
+  nhead: 8                  # Number of attention heads
+  num_layers: 4             # Number of transformer layers
+  d_ff: 256                 # Feed-forward dimension
+  dropout: 0.1
+  seq_length: 60            # Input sequence length (trading days)
+  prediction_horizons:      # Days ahead to predict
+    - 1
+    - 5
+    - 10
+    - 20
+  
+  # Training settings
+  learning_rate: 0.001
+  epochs: 100
+  early_stopping_patience: 10
+
+# Fed Rate Predictor (LSTM/Transformer)
+fed_rate_predictor:
+  model_type: lstm          # lstm or transformer
+  hidden_dim: 64            # Hidden layer dimension
+  num_layers: 2             # Number of LSTM/Transformer layers
+  dropout: 0.2
+  bidirectional: false      # Use bidirectional LSTM
+  predict_magnitude: true   # Also predict rate change magnitude
+  
+  # Classification settings
+  n_classes: 3              # Increase, Decrease, No Change
+  
+  # Training settings
+  learning_rate: 0.001
+  epochs: 100
+
+# Neural GARCH Configuration
+neural_garch:
+  p: 1                      # ARCH order (lagged squared returns)
+  q: 1                      # GARCH order (lagged variances)
+  hidden_layers:            # MLP hidden layer sizes
+    - 32
+    - 16
+  activation: relu          # relu, gelu, or tanh
+  use_skip_connection: true # Add linear GARCH component
+  
+  # Training settings
+  learning_rate: 0.001
+  epochs: 100
+
+# Feature Engineering
+features:
+  include_returns: true         # Return-based features
+  include_volatility: true      # Volatility features
+  include_technicals: true      # Technical indicators
+  include_regime: true          # Market regime indicators
+  scaler_type: standard         # standard (z-score) or minmax (0-1)
+  
+  # Technical indicator periods
+  rsi_periods:
+    - 14
+    - 28
+  volatility_windows:
+    - 5
+    - 10
+    - 20
+    - 60
+
+# Training Configuration
+training:
+  train_ratio: 0.7          # Fraction of data for training
+  val_ratio: 0.15           # Fraction for validation
+  test_ratio: 0.15          # Fraction for testing (implicit)
+  shuffle: false            # Don't shuffle time series data
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+    
+  # Learning rate scheduling
+  scheduler:
+    enabled: true
+    type: cosine            # cosine or step
+    warmup_epochs: 5
 
