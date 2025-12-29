@@ -6,12 +6,15 @@ and data validation.
 """
 
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy.stats import norm
+from scipy.optimize import brentq
 from tqdm import tqdm
 
 from src.utils import DataError, ValidationError, ensure_directory, parse_date
@@ -89,7 +92,7 @@ def fetch_data(
     raise DataError(f"Unexpected error fetching data for {symbol}")
 
 
-def validate_ohlc_data(df: pd.DataFrame) -> pd.DataFrame:
+def validate_ohlc_data(df: pd.DataFrame, raise_errors: bool = False) -> pd.DataFrame:
     """
     Validate and fix OHLC data relationships.
 
@@ -101,54 +104,72 @@ def validate_ohlc_data(df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df: DataFrame with OHLC columns
+        raise_errors: If True, raise ValidationError instead of fixing/removing invalid data
 
     Returns:
         DataFrame with validated and cleaned data
+
+    Raises:
+        ValidationError: If raise_errors=True and validation fails
     """
     if df is None or df.empty:
+        if raise_errors:
+            raise ValidationError("Input DataFrame is empty")
         return pd.DataFrame()
 
     required_cols = ['open', 'high', 'low', 'close']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
+        if raise_errors:
+            raise ValidationError(f"Missing required columns: {missing_cols}")
         return pd.DataFrame()
 
     # Make a copy to avoid modifying original
     df = df.copy()
 
-    # Drop rows with missing values in critical columns instead of raising error
+    # Check for missing values
     missing_mask = df[required_cols].isna().any(axis=1)
     if missing_mask.sum() > 0:
+        if raise_errors:
+            raise ValidationError("Missing values in required OHLC columns")
         df = df[~missing_mask].copy()
     
     if df.empty:
+        if raise_errors:
+            raise ValidationError("No valid data after removing missing values")
         return pd.DataFrame()
 
-    # Drop rows with non-positive prices instead of raising error
+    # Check for non-positive prices
     non_positive = (df[required_cols] <= 0).any(axis=1)
     if non_positive.sum() > 0:
+        if raise_errors:
+            raise ValidationError("non-positive prices found in OHLC data")
         df = df[~non_positive].copy()
     
     if df.empty:
+        if raise_errors:
+            raise ValidationError("No valid data after removing non-positive prices")
         return pd.DataFrame()
 
-    # Fix OHLC relationships automatically
-    # High must be >= max(Open, Close)
+    # Check for invalid OHLC relationships
     max_oc = df[['open', 'close']].max(axis=1)
     invalid_high = df['high'] < max_oc
-    if invalid_high.sum() > 0:
-        df.loc[invalid_high, 'high'] = max_oc[invalid_high]
-    
-    # Low must be <= min(Open, Close)
-    min_oc = df[['open', 'close']].min(axis=1)
-    invalid_low = df['low'] > min_oc
-    if invalid_low.sum() > 0:
-        df.loc[invalid_low, 'low'] = min_oc[invalid_low]
-    
-    # Ensure High >= Low
+    invalid_low = df['low'] > df[['open', 'close']].min(axis=1)
     invalid_hl = df['high'] < df['low']
-    if invalid_hl.sum() > 0:
-        df.loc[invalid_hl, 'high'] = df.loc[invalid_hl, 'low']
+    
+    if (invalid_high.sum() > 0 or invalid_low.sum() > 0 or invalid_hl.sum() > 0):
+        if raise_errors:
+            raise ValidationError("invalid OHLC relationships detected")
+        # Fix OHLC relationships automatically
+        if invalid_high.sum() > 0:
+            df.loc[invalid_high, 'high'] = max_oc[invalid_high]
+        
+        min_oc = df[['open', 'close']].min(axis=1)
+        if invalid_low.sum() > 0:
+            df.loc[invalid_low, 'low'] = min_oc[invalid_low]
+        
+        if invalid_hl.sum() > 0:
+            df.loc[invalid_hl, 'high'] = df.loc[invalid_hl, 'low']
 
     # Reset index after dropping rows
     df = df.reset_index(drop=True)
@@ -374,4 +395,359 @@ def check_data_quality(df: pd.DataFrame) -> dict:
                     }
 
     return report
+
+
+def black_scholes_price(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    sigma: float,
+    option_type: str = 'call'
+) -> float:
+    """
+    Calculate Black-Scholes option price.
+    
+    Args:
+        S: Current stock price
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free interest rate (annual)
+        sigma: Volatility (annual, as decimal, e.g., 0.20 for 20%)
+        option_type: 'call' or 'put'
+    
+    Returns:
+        Option price
+    """
+    if T <= 0:
+        # Option expired
+        if option_type == 'call':
+            return max(S - K, 0)
+        else:
+            return max(K - S, 0)
+    
+    if sigma <= 0:
+        # No volatility
+        if option_type == 'call':
+            return max(S - K * np.exp(-r * T), 0)
+        else:
+            return max(K * np.exp(-r * T) - S, 0)
+    
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    
+    if option_type == 'call':
+        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    else:  # put
+        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    
+    return max(price, 0)  # Option price cannot be negative
+
+
+def black_scholes_vega(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    sigma: float
+) -> float:
+    """
+    Calculate Black-Scholes vega (sensitivity to volatility).
+    
+    Args:
+        S: Current stock price
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free interest rate (annual)
+        sigma: Volatility (annual, as decimal)
+    
+    Returns:
+        Vega value
+    """
+    if T <= 0 or sigma <= 0:
+        return 0.0
+    
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    vega = S * norm.pdf(d1) * np.sqrt(T)
+    
+    return vega
+
+
+def calculate_implied_volatility_bs(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    market_price: float,
+    option_type: str = 'call',
+    max_iterations: int = 100,
+    tolerance: float = 1e-6
+) -> Optional[float]:
+    """
+    Calculate implied volatility using Black-Scholes inversion.
+    
+    Uses Newton-Raphson method to solve for sigma given market price.
+    
+    Args:
+        S: Current stock price
+        K: Strike price
+        T: Time to expiration (in years)
+        r: Risk-free interest rate (annual)
+        market_price: Market price of the option
+        option_type: 'call' or 'put'
+        max_iterations: Maximum iterations for Newton-Raphson
+        tolerance: Convergence tolerance
+    
+    Returns:
+        Implied volatility as decimal (e.g., 0.20 for 20%), or None if cannot solve
+    """
+    if T <= 0:
+        return None
+    
+    if market_price <= 0:
+        return None
+    
+    # Initial guess: use a reasonable volatility estimate
+    # For most stocks, IV is typically between 10% and 100%
+    sigma = 0.30  # Start with 30% as initial guess
+    
+    # Use Newton-Raphson method
+    for i in range(max_iterations):
+        # Calculate option price with current sigma
+        price = black_scholes_price(S, K, T, r, sigma, option_type)
+        
+        # Calculate vega (derivative with respect to volatility)
+        vega = black_scholes_vega(S, K, T, r, sigma)
+        
+        if vega < 1e-10:  # Vega too small, cannot converge
+            break
+        
+        # Newton-Raphson update: sigma_new = sigma_old - (price - market_price) / vega
+        price_diff = price - market_price
+        if abs(price_diff) < tolerance:
+            # Converged
+            return sigma
+        
+        sigma_new = sigma - price_diff / vega
+        
+        # Ensure sigma stays in reasonable bounds (0.1% to 500%)
+        sigma_new = max(0.001, min(5.0, sigma_new))
+        
+        # Check for convergence
+        if abs(sigma_new - sigma) < tolerance:
+            return sigma_new
+        
+        sigma = sigma_new
+    
+    # If Newton-Raphson didn't converge, try Brent's method as fallback
+    try:
+        def price_error(sig):
+            return black_scholes_price(S, K, T, r, sig, option_type) - market_price
+        
+        # Brent's method finds root in interval [0.001, 5.0]
+        iv = brentq(price_error, 0.001, 5.0, maxiter=100, xtol=tolerance)
+        return iv
+    except (ValueError, RuntimeError):
+        # Brent's method failed (no root in interval or other error)
+        return None
+
+
+def get_risk_free_rate() -> float:
+    """
+    Get current risk-free rate (approximation using 10-year Treasury yield).
+    
+    Returns:
+        Risk-free rate as decimal (e.g., 0.05 for 5%)
+    """
+    try:
+        # Try to get 10-year Treasury rate from yfinance
+        treasury = yf.Ticker("^TNX")
+        hist = treasury.history(period="1d")
+        if not hist.empty:
+            rate = float(hist['Close'].iloc[-1]) / 100.0
+            return max(0.0, min(0.10, rate))  # Clamp between 0% and 10%
+    except Exception:
+        pass
+    
+    # Default: use 4% as reasonable approximation
+    return 0.04
+
+
+def fetch_implied_volatility_from_options_bs(
+    symbol: str,
+    horizon_days: int = 30,
+    retry_attempts: int = 3,
+    rate_limit_delay: float = 1.0
+) -> Optional[float]:
+    """
+    Calculate implied volatility using Black-Scholes inversion from option prices.
+    
+    Gets option chain data, finds ATM options, and calculates IV using
+    Black-Scholes model inversion.
+    
+    Args:
+        symbol: Asset symbol
+        horizon_days: Target horizon in days
+        retry_attempts: Number of retry attempts
+        rate_limit_delay: Delay between requests
+    
+    Returns:
+        Implied volatility as percentage (e.g., 15.5 for 15.5%), or None if unavailable
+    """
+    time.sleep(rate_limit_delay)
+    
+    for attempt in range(1, retry_attempts + 1):
+        try:
+            ticker = yf.Ticker(symbol)
+            
+            # Get current stock price
+            info = ticker.info
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+            if current_price is None:
+                hist = ticker.history(period="1d")
+                if not hist.empty:
+                    current_price = float(hist['Close'].iloc[-1])
+                else:
+                    return None
+            
+            # Get risk-free rate
+            r = get_risk_free_rate()
+            
+            # Get options expiration dates
+            try:
+                expirations = ticker.options
+                if not expirations:
+                    return None
+            except Exception:
+                return None
+            
+            # Find expiration closest to target horizon
+            target_date = datetime.now() + timedelta(days=horizon_days)
+            best_exp = None
+            min_diff = float('inf')
+            
+            for exp_str in expirations:
+                try:
+                    exp_date = datetime.strptime(exp_str, '%Y-%m-%d')
+                    days_to_exp = (exp_date - datetime.now()).days
+                    if 1 <= days_to_exp <= 90:
+                        diff = abs((exp_date - target_date).days)
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_exp = exp_str
+                except Exception:
+                    continue
+            
+            if best_exp is None:
+                return None
+            
+            # Get option chain
+            try:
+                opt_chain = ticker.option_chain(best_exp)
+                calls = opt_chain.calls
+                puts = opt_chain.puts
+            except Exception:
+                return None
+            
+            # Calculate time to expiration in years
+            exp_date = datetime.strptime(best_exp, '%Y-%m-%d')
+            T = (exp_date - datetime.now()).days / 365.0
+            
+            if T <= 0:
+                return None
+            
+            # Find ATM options (closest to current price)
+            calls['strike_diff'] = abs(calls['strike'] - current_price)
+            puts['strike_diff'] = abs(puts['strike'] - current_price)
+            
+            # Get closest calls and puts (within 5% of current price)
+            atm_calls = calls[calls['strike_diff'] / current_price <= 0.05].nsmallest(10, 'strike_diff')
+            atm_puts = puts[puts['strike_diff'] / current_price <= 0.05].nsmallest(10, 'strike_diff')
+            
+            iv_values = []
+            
+            # Calculate IV from call options
+            for _, call in atm_calls.iterrows():
+                if pd.notna(call.get('lastPrice')) and call.get('lastPrice', 0) > 0:
+                    market_price = call['lastPrice']
+                    K = call['strike']
+                    iv = calculate_implied_volatility_bs(
+                        S=current_price,
+                        K=K,
+                        T=T,
+                        r=r,
+                        market_price=market_price,
+                        option_type='call'
+                    )
+                    if iv is not None and 0.01 <= iv <= 2.0:  # Between 1% and 200%
+                        iv_values.append(iv)
+            
+            # Calculate IV from put options
+            for _, put in atm_puts.iterrows():
+                if pd.notna(put.get('lastPrice')) and put.get('lastPrice', 0) > 0:
+                    market_price = put['lastPrice']
+                    K = put['strike']
+                    iv = calculate_implied_volatility_bs(
+                        S=current_price,
+                        K=K,
+                        T=T,
+                        r=r,
+                        market_price=market_price,
+                        option_type='put'
+                    )
+                    if iv is not None and 0.01 <= iv <= 2.0:  # Between 1% and 200%
+                        iv_values.append(iv)
+            
+            if len(iv_values) == 0:
+                return None
+            
+            # Return median IV (more robust than mean)
+            median_iv = float(np.median(iv_values)) * 100  # Convert to percentage
+            
+            return median_iv
+            
+        except Exception as e:
+            if attempt < retry_attempts:
+                wait_time = 2 ** (attempt - 1)
+                time.sleep(wait_time)
+                continue
+            return None
+    
+    return None
+
+
+def get_implied_volatility(
+    symbol: str,
+    df: pd.DataFrame,
+    horizon_days: int = 30,
+    use_api: bool = True,
+    retry_attempts: int = 3,
+    rate_limit_delay: float = 1.0
+) -> Optional[float]:
+    """
+    Get implied volatility for a symbol, matching the forecast horizon.
+    
+    Uses ONLY Black-Scholes inversion to calculate IV from option market prices.
+    No fallback methods - returns None if options data is unavailable.
+    
+    Args:
+        symbol: Asset symbol
+        df: DataFrame with OHLC data (not used, kept for compatibility)
+        horizon_days: Target horizon in days (should match forecast horizon)
+        use_api: Whether to fetch from options API (default: True)
+        retry_attempts: Number of retry attempts for API calls
+        rate_limit_delay: Delay between API requests
+    
+    Returns:
+        Implied volatility as a percentage, or None if unavailable
+    """
+    # Use ONLY Black-Scholes calculation from option prices
+    iv_bs = fetch_implied_volatility_from_options_bs(
+        symbol,
+        horizon_days=horizon_days,
+        retry_attempts=retry_attempts,
+        rate_limit_delay=rate_limit_delay
+    )
+    
+    return iv_bs
 
