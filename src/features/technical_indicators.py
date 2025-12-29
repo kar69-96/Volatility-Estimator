@@ -506,3 +506,9 @@ def calculate_garman_klass_volatility(
     
     return vol * 100
 
+
+
+
+
+
+
