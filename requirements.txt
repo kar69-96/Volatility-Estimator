@@ -42,7 +42,6 @@ pyarrow>=12.0.0
 tqdm>=4.65.0
 python-dotenv>=1.0.0
 scipy>=1.10.0
-streamlit>=1.28.0
 plotly>=5.17.0
 
 # PyTorch Dependencies
@@ -69,3 +68,8 @@ arch>=6.2.0
 
 # Optional: PyTorch Lightning (for advanced training features)
 # pytorch-lightning>=2.0.0
+
+# Lambda Labs CLI (for auto-termination of instances)
+# Install at least one of these:
+# lambdacloud>=0.1.0  # Official Lambda Labs CLI (recommended)
+# lambda-cli>=0.1.0   # Third-party Lambda CLI (alternative)

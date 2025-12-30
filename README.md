@@ -1,196 +1,149 @@
 # Volatility Estimator Stack
 
-Built this as a compact volatility analytics “workbench”: pull OHLC data, run multiple volatility estimators over configurable horizons, compare them side-by-side, and (optionally) look at event windows and simple pattern-based forecasts.
+Stock volatility analysis and forecasting. Calculates and analyzes stock market volatility using multiple estimators (Close-to-Close, EWMA, Parkinson, Rogers-Satchell, Yang-Zhang) and forecasts future volatility for horizon windows using a fine-tuned (NVIDIA A100) volatility model trained on stocks included in the S&P 500.
 
-Meant to be easy to explore interactively (Streamlit) but also usable from the command line for repeatable runs.
+It combines traditional statistical estimators with modern deep learning approaches to analyze and forecast stock market volatility patterns.
 
-## What’s inside
+## Features
 
-- **Data pipeline**: fetch OHLC data via `yfinance`, validate it, and cache locally as Parquet for fast reruns.
-- **Volatility estimators (5)**:
-  - **Close-to-Close**
-  - **EWMA** (RiskMetrics-style smoothing)
-  - **Parkinson**
-  - **Rogers–Satchell**
-  - **Yang–Zhang**
-- **Comparison framework**: run all estimators on the same dataset and compute helpful diagnostics (e.g., correlations / MSE).
-- **Event analysis & predictions**: utilities to study volatility around known events and generate simple forward-looking paths.
-- **Outputs**: CSV/Excel exports and plots for quick sharing.
+### Deep Learning & Forecasting
 
-## Requirements
+The toolkit's core strength lies in its advanced deep learning-based volatility forecasting capabilities:
 
-- **Python 3.10+**
-  - On macOS, Python 3.9 can break Streamlit’s WebSocket connection due to a known asyncio/kqueue selector issue. Upgrading to 3.10+ fixes it.
-- Dependencies are listed in `requirements.txt`.
+- **Chronos Transformer Predictions**: Volatility forecasting using fine-tuned Chronos transformer models trained on S&P 500 data. Provides probabilistic forecasts (q10, q50, q90 quantiles) for configurable prediction horizons (default: 20 trading days). 
 
-## Quick start (Streamlit)
+- **Pattern-Based Forecasts**: Generate volatility predictions by identifying and matching historical similar events from economic calendars. Uses pattern matching algorithms to find comparable market conditions and extrapolate volatility paths.
 
-```bash
-python3.10 -m venv venv310
-source venv310/bin/activate
-pip install -r requirements.txt
-
-streamlit run frontend/app.py
-```
-
-Or use the provided script:
-
-```bash
-./scripts/run_app.sh
-```
-
-Then open `http://localhost:8501`.
-
-## Quick start (CLI)
-
-Single estimator:
-
-```bash
-python src/run.py --symbol SPY --estimator yang_zhang --window 60
-```
-
-Compare all estimators:
-
-```bash
-python src/run.py --symbol SPY --compare --window 60
-```
-
-Event window analysis:
-
-```bash
-python src/run.py --symbol SPY --events --event_window 5 --window 60
-```
-
-Run “full” workflow (comparison + events + predictions + reports):
-
-```bash
-python src/run.py --symbol SPY --compare --events --predict --window 60 --output_dir ./outputs
-```
-
-## How the pipeline is structured
-
-At a high level:
-
-1. **Retrieve** market data (API)
-2. **Validate** (shape, missing values, date range consistency)
-3. **Cache** to `data/cache/` (Parquet)
-4. **Compute** returns + estimator-specific rolling measures
-5. **Compare / analyze / export**
-
-The estimator interface is intentionally small: each estimator implements `calculate()` and inherits validation + annualization behavior from a shared base class.
+- **Training Infrastructure**: Full pipeline for fine-tuning Chronos models on custom datasets with:
+  - LoRA (Low-Rank Adaptation) for parameter-efficient training
+  - Support for NVIDIA A100 GPU instances (Lambda Labs integration) with CUDA acceleration
+  - Model export to Hugging Face Hub format
+  - Weighted sampling to emphasize recent market data
+  - Pre-trained sample model (only trained on 8 stocks): [karkar69/chronos-volatility](https://huggingface.co/karkar69/chronos-volatility)
 
 
-## Notes on the estimators
+### Volatility Estimators
 
-- **Close-to-Close**: baseline realized volatility from close-to-close returns.
-- **EWMA**: exponentially weighted variance/volatility (good for “recent shock” sensitivity).
-- **Parkinson / Rogers–Satchell / Yang–Zhang**: range-based estimators that use OHLC structure to improve efficiency vs. close-only approaches.
+Five traditional statistical estimators are implemented for historical volatility estimation:
 
-## Deep Learning Models
+1. **Close-to-Close**: Standard realized volatility from daily close-to-close returns
+2. **EWMA**: Exponentially weighted moving average (RiskMetrics-style) with configurable decay parameter
+3. **Parkinson**: Range-based estimator using high/low prices (more efficient than close-to-close)
+4. **Rogers-Satchell**: Range-based estimator accounting for drift bias
+5. **Yang-Zhang**: Comprehensive range-based estimator combining multiple components (recommended for accuracy)
 
-The stack now includes PyTorch-based deep learning models for advanced volatility prediction:
+### Analysis Capabilities
 
-### Models Available
+- **Estimator Comparison**: Run all estimators simultaneously and compute correlation matrices, MSE comparisons, and summary statistics to understand estimator relationships and performance
+- **Event Analysis**: Analyze volatility impact around economic calendar events with statistical significance testing to quantify how events affect market volatility
 
-1. **iTransformer Volatility Predictor**
-   - Inverted transformer architecture (tokens = features, not time steps)
-   - Multi-horizon prediction (1, 5, 10, 20 days ahead)
-   - Automatic feature extraction from OHLC data
+### Output Formats
 
-2. **Neural GARCH**
-   - Neural network-based conditional variance estimation
-   - Learns nonlinear GARCH dynamics
-   - Extends BaseEstimator for seamless integration
+- Console output with summary statistics
+- CSV exports for time series data
+- Excel reports with multiple sheets (volatility estimates, events, predictions)
+- Plotly-generated charts (saved as PNG)
+- Text-based summary reports
 
-3. **Fed Rate Predictor** (LSTM/Transformer)
-   - Predicts Fed rate direction (Increase/Decrease/No Change)
-   - Optional magnitude prediction in basis points
+## Architecture
 
-### GPU Support
+### Data Pipeline
 
-- Automatic device detection (CUDA > MPS > CPU)
-- Mixed precision training for faster GPU training
-- Works on CPU if no GPU available
+The system follows a clean data pipeline architecture:
 
-### Quick Start (Deep Learning)
+1. **Fetch**: Download OHLC data via `yfinance` API
+2. **Validate**: Check data quality (missing values, date consistency, shape validation)
+3. **Cache**: Store validated data as Parquet files for fast subsequent runs
+4. **Compute**: Calculate returns and estimator-specific rolling measures
+5. **Analyze**: Run comparisons, event analysis, and predictions
+6. **Export**: Generate reports and visualizations
 
-```python
-from src.predictions import predict_volatility_dl, predict_neural_garch
+### Estimator Design
 
-# iTransformer prediction
-result = predict_volatility_dl(df, device='auto')
-print(result['predictions'])  # {'1d': 15.2, '5d': 16.8, ...}
+All volatility estimators inherit from a common `BaseEstimator` class that provides:
+- Input validation (window size, data requirements)
+- Annualization handling (configurable trading days per year)
+- Consistent interface (`calculate()` method)
+- Error handling and data quality checks
 
-# Neural GARCH
-result = predict_neural_garch(df, p=1, q=1, epochs=100)
-print(result['current_volatility'])  # 18.5%
-```
+This design allows for easy extension and comparison across estimators while maintaining code consistency.
 
-### Training Models
+### Deep Learning Architecture
 
-```python
-from src.predictions import train_dl_models
+The deep learning components use:
+- **Base Model**: Amazon Chronos T5 (transformer-based time series foundation)
+- **Fine-tuning Method**: LoRA (Low-Rank Adaptation) for parameter-efficient training
+- **Task Head**: Custom quantile regression head (q10, q50, q90) for probabilistic forecasts
+- **Training Data**: S&P 500 stocks with weighted sampling to emphasize recent data
+- **Sequence Length**: 252 trading days (1 year) for context
+- **Prediction Horizon**: 20 trading days ahead
 
-# Train volatility predictor
-result = train_dl_models(
-    df, 
-    model_type='volatility',
-    epochs=100,
-    device='cuda'
-)
-print(f"Model saved to: {result['model_path']}")
-```
 
-### Configuration
+## Notes
 
-Deep learning settings are in `config.yaml`:
+### Estimator Selection
 
-```yaml
-deep_learning:
-  device: auto
-  batch_size: 64
-  mixed_precision: true
+- **Yang-Zhang** is recommended as the default estimator due to its comprehensive use of OHLC data and superior efficiency compared to close-to-close methods
+- **EWMA** is useful when recent volatility shocks should be weighted more heavily (financial crisis scenarios)
+- **Parkinson** and **Rogers-Satchell** are intermediate options that use range data but may have limitations with drift
 
-volatility_predictor:
-  model_type: itransformer
-  d_model: 128
-  nhead: 8
-  num_layers: 4
-```
+### Data Considerations
 
-### Requirements
+- Market data is cached locally as Parquet files to avoid repeated API calls
+- Default date range (2004-2024) can be configured in `config.yaml`
+- Data quality validation ensures missing values and inconsistencies are detected early
+- Economic calendar events are loaded from CSV (can be extended to FRED API)
 
-For deep learning features, install PyTorch:
+### Model Limitations
 
-```bash
-# CPU only
-pip install torch
+- The Chronos model is fine-tuned on S&P 500 stocks and may not generalize well to:
+  - International markets
+  - Different asset classes (bonds, commodities)
+  - Extremely volatile periods outside training distribution
+- Pattern-based predictions rely on historical similarity matching and assume past patterns will repeat
+- All predictions are probabilistic (quantiles) and should be interpreted with appropriate uncertainty
 
-# With CUDA (GPU)
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-```
+### Performance
 
-## Project Structure
+- Traditional estimators are fast (milliseconds per symbol, CPU-only)
+- Chronos predictions require GPU for reasonable inference time:
+  - **CUDA (NVIDIA GPU)**: Recommended for best performance (10-100x faster than CPU)
+  - **CPU**: Works but slow (inference can take minutes vs seconds on GPU)
+  - **MPS (Apple Silicon)**: Supported but performance varies
+- Training on full S&P 500 requires GPU (A100 recommended) and several hours:
+  - CUDA-enabled GPUs allow mixed precision training (FP16) for 2x speedup
+  - Training benefits significantly from GPU memory bandwidth and parallel processing
+- Data caching significantly speeds up repeated analysis on the same symbols
 
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed documentation of the repository organization.
+### GPU/CUDA Requirements
 
-## Testing
+Deep learning features (Chronos predictions and training) benefit significantly from CUDA-enabled NVIDIA GPUs:
 
-```bash
-pytest -q
-```
+- **CUDA Support**: The toolkit automatically detects and uses CUDA when available
+- **CUDA Versions**: Compatible with CUDA 11.8+ and 12.1+ (install matching PyTorch version)
+- **Performance**: GPU inference is 10-100x faster than CPU, and training requires GPU for practical use
+- **Mixed Precision**: Automatic FP16 mixed precision training when CUDA is available, reducing memory usage and increasing speed
+- **Device Selection**: Use `device='auto'` in code (default) for automatic CUDA detection, or explicitly set `device='cuda'` for GPU or `device='cpu'` for CPU-only
 
-With coverage:
+## Drawbacks
 
-```bash
-pytest --cov=src --cov-report=term-missing
-```
+1. **Limited Asset Coverage**: Training data focuses on S&P 500 stocks; predictions on international or smaller-cap stocks may be less reliable
 
-## Credits & Attribution
+2. **Historical Bias**: Pattern-based predictions assume historical patterns repeat, which may not hold during unprecedented market conditions
 
-Deep learning implementation leverages concepts from:
-- iTransformer paper (arXiv:2310.06625)
-- PyTorch ecosystem
-- Stock Transformers repository (architecture reference)
-- Transformers Predictions dashboard (UI reference)
+3. **Event Dependency**: Event analysis requires accurate economic calendar data; missing or incorrect event dates will affect results
 
+4. **Computational Requirements**: Deep learning features require GPU for practical use; CPU inference is possible but slow
+
+5. **Single-Symbol Workflow**: CLI processes one symbol at a time; batch processing requires scripting multiple calls
+
+6. **Model Maintenance**: Fine-tuned models may need periodic retraining as market dynamics evolve
+
+7. **API Dependency**: Relies on `yfinance` for market data; API changes or rate limits could affect functionality
+
+## See Also
+
+- [SETUP.md](SETUP.md) - Installation and setup instructions
+- [USAGE.md](USAGE.md) - Comprehensive command reference and usage guide
+- [docs/LOCAL_TRAINING.md](docs/LOCAL_TRAINING.md) - Local training guide
+- [docs/LAMBDA_SETUP.md](docs/LAMBDA_SETUP.md) - Lambda Labs GPU setup guide
