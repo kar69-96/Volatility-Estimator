@@ -8,8 +8,6 @@ It combines traditional statistical estimators with modern deep learning approac
 
 ### Deep Learning & Forecasting
 
-The toolkit's core strength lies in its advanced deep learning-based volatility forecasting capabilities:
-
 - **Chronos Transformer Predictions**: Volatility forecasting using fine-tuned Chronos transformer models trained on S&P 500 data. Provides probabilistic forecasts (q10, q50, q90 quantiles) for configurable prediction horizons (default: 20 trading days). 
 
 - **Pattern-Based Forecasts**: Generate volatility predictions by identifying and matching historical similar events from economic calendars. Uses pattern matching algorithms to find comparable market conditions and extrapolate volatility paths.
@@ -105,12 +103,10 @@ The deep learning components use:
 
 ### Performance
 
-- Traditional estimators are fast (milliseconds per symbol, CPU-only)
 - Chronos predictions require GPU for reasonable inference time:
-  - **CUDA (NVIDIA GPU)**: Recommended for best performance (10-100x faster than CPU)
-  - **CPU**: Works but slow (inference can take minutes vs seconds on GPU)
-  - **MPS (Apple Silicon)**: Supported but performance varies
-- Training on full S&P 500 requires GPU (A100 recommended) and several hours:
+  - **CUDA (NVIDIA GPU)**: Recommended for best performance 
+  - **CPU**: Works but slow 
+- Training on full S&P 500 requires GPU (I trained on A100) and several hours (12+):
   - CUDA-enabled GPUs allow mixed precision training (FP16) for 2x speedup
   - Training benefits significantly from GPU memory bandwidth and parallel processing
 - Data caching significantly speeds up repeated analysis on the same symbols
@@ -124,6 +120,15 @@ Deep learning features (Chronos predictions and training) benefit significantly 
 - **Performance**: GPU inference is 10-100x faster than CPU, and training requires GPU for practical use
 - **Mixed Precision**: Automatic FP16 mixed precision training when CUDA is available, reducing memory usage and increasing speed
 - **Device Selection**: Use `device='auto'` in code (default) for automatic CUDA detection, or explicitly set `device='cuda'` for GPU or `device='cpu'` for CPU-only
+
+## AI Usage
+
+AI was used for supporting and supplementary tasks throughout the project:
+
+-**Debugging**: AI (primarily Sonnet 4.5) was used for debugging all types of failures. Very useful in debugging issues with finetuning scripts, which was new to me.
+-**Error Handling**: Used to create edge cases and fallbacks if primary approach does not work. LLMs (mainly Codex-mini) were very good at thinking through potential errors and providing fallbacks. 
+-**Docs**: Used to compile information and create docs (README, SETUP.md, USAGE.md, LAMBDA_SETUP.md) and init files. Used Gemini Flash for this. 
+-**Configurations**: Had trouble configuring complicated files, such as setup_lambda.sh or run.py for CLI commands. Opus 4.5 and Codex Max were useful in taking care of tedious tasks so I can focus on backend logic. 
 
 ## Drawbacks
 
