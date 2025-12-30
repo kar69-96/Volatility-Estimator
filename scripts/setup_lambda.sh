@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup script for Lambda Labs instance
-# Installs all dependencies with correct CUDA versions
+# Creates virtual environment and installs all dependencies with correct CUDA versions
 
 set -e
 
@@ -8,9 +8,40 @@ echo "=========================================="
 echo "Lambda Labs Setup Script"
 echo "=========================================="
 
+# Check if venv already exists
+if [ -d "venv" ]; then
+    echo ""
+    echo "Virtual environment 'venv' already exists."
+    read -p "Do you want to remove it and create a fresh one? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Removing existing virtual environment..."
+        rm -rf venv
+    else
+        echo "Using existing virtual environment..."
+    fi
+fi
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "venv" ]; then
+    echo ""
+    echo "Step 1: Creating virtual environment..."
+    python3 -m venv venv
+fi
+
+# Activate virtual environment
+echo ""
+echo "Step 2: Activating virtual environment..."
+source venv/bin/activate
+
+# Upgrade pip
+echo ""
+echo "Step 3: Upgrading pip..."
+pip install --upgrade pip
+
 # Detect CUDA version
 echo ""
-echo "Step 1: Detecting CUDA version..."
+echo "Step 4: Detecting CUDA version..."
 if command -v nvcc &> /dev/null; then
     CUDA_VERSION=$(nvcc --version | grep "release" | sed 's/.*release \([0-9]\+\.[0-9]\+\).*/\1/')
     echo "  Found CUDA: $CUDA_VERSION"
@@ -33,12 +64,12 @@ fi
 
 # Install PyTorch packages from index
 echo ""
-echo "Step 2: Installing PyTorch packages with matching CUDA versions..."
+echo "Step 5: Installing PyTorch packages with matching CUDA versions..."
 pip install --no-cache-dir torch torchvision torchaudio --index-url "$PYTORCH_INDEX"
 
 # Verify PyTorch installation
 echo ""
-echo "Step 3: Verifying PyTorch installation..."
+echo "Step 6: Verifying PyTorch installation..."
 python3 -c "
 import torch
 print(f'  ✓ PyTorch {torch.__version__}')
@@ -48,18 +79,22 @@ if torch.cuda.is_available():
     print(f'  ✓ GPU: {torch.cuda.get_device_name(0)}')
 import torchvision
 print(f'  ✓ torchvision {torchvision.__version__}')
+print(f'  ✓ torchvision path: {torchvision.__file__}')
+# Verify it's NOT from system packages
+assert '/usr/lib/python3/dist-packages' not in torchvision.__file__, 'ERROR: torchvision is from system packages!'
+print('  ✓ torchvision is from virtual environment (not system packages)')
 import torchaudio
 print(f'  ✓ torchaudio {torchaudio.__version__}')
 "
 
 # Install remaining requirements
 echo ""
-echo "Step 4: Installing remaining requirements..."
+echo "Step 7: Installing remaining requirements..."
 pip install --no-cache-dir -r requirements.txt
 
 # Verify critical dependencies
 echo ""
-echo "Step 5: Verifying critical dependencies..."
+echo "Step 8: Verifying critical dependencies..."
 python3 -c "
 print('  Checking Pillow...')
 import PIL
@@ -89,6 +124,10 @@ echo "=========================================="
 echo "✓ Setup complete!"
 echo "=========================================="
 echo ""
-echo "You can now run: python3 scripts/train.py"
+echo "To activate the virtual environment in future sessions:"
+echo "  source venv/bin/activate"
 echo ""
-
+echo "To run training:"
+echo "  source venv/bin/activate"
+echo "  python3 scripts/train.py"
+echo ""

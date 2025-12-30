@@ -1,17 +1,28 @@
 # ============================================================================
-# IMPORTANT: PyTorch Installation Instructions for Lambda Labs
+# IMPORTANT: Installation Instructions for Lambda Labs / Ubuntu
 # ============================================================================
-# PyTorch, torchvision, and torchaudio MUST be installed from PyTorch index
-# to ensure matching CUDA versions. Lambda Labs typically uses CUDA 11.8.
+# Ubuntu systems often have system-installed PyTorch packages in
+# /usr/lib/python3/dist-packages/ that can conflict with pip installations.
+# 
+# SOLUTION: Use a virtual environment to avoid conflicts.
 #
-# Install PyTorch packages FIRST with:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Quick Setup:
+#   1. Create virtual environment:
+#      python3 -m venv venv
+#      source venv/bin/activate
 #
-# Then install remaining requirements:
-#   pip install -r requirements.txt
+#   2. Upgrade pip:
+#      pip install --upgrade pip
 #
-# If CUDA 12.1 is available:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   3. Install PyTorch packages FIRST (must match CUDA version):
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#      (For CUDA 12.1: --index-url https://download.pytorch.org/whl/cu121)
+#
+#   4. Install remaining requirements:
+#      pip install -r requirements.txt
+#
+# Or use the setup script:
+#   bash scripts/setup_lambda.sh
 # ============================================================================
 
 # Core Dependencies
@@ -35,16 +46,15 @@ streamlit>=1.28.0
 plotly>=5.17.0
 
 # PyTorch Dependencies
-# NOTE: These should be installed from PyTorch index (see instructions above)
-# Leaving them commented here to avoid version conflicts
-# torch>=2.0.0
-# torchvision>=0.15.0
-# torchaudio>=2.0.0
+# NOTE: Install these FIRST from PyTorch index before installing other requirements
+# They are NOT listed here to avoid version conflicts - install via:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Transformers and Chronos (requires T5 support)
 transformers>=4.40.0
 peft>=0.6.0
 sentencepiece>=0.1.99
+accelerate>=0.20.0  # Required for transformers
 
 # Image Processing (required for transformers 4.40+)
 Pillow>=9.0.0
