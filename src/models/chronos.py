@@ -61,12 +61,16 @@ class ChronosVolatility(nn.Module):
             debug_log.append({"location": "chronos.py:47", "message": "model_mapping_check", "data": {"has_mapping": hasattr(AutoModelForSeq2SeqLM, '_model_mapping'), "has_config_mapping": hasattr(AutoModelForSeq2SeqLM, '_config_mapping')}, "hypothesisId": "E"})
         except: pass
         try:
+            import sys
             log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(log_path, 'a') as f:
                 for entry in debug_log:
-                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", **entry}, f)
+                    log_entry = {"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", **entry}
+                    json.dump(log_entry, f)
                     f.write('\n')
+                    # Also print to stderr for terminal visibility
+                    print(f"[DEBUG] {entry.get('message', 'unknown')}: {entry.get('data', {})}", file=sys.stderr)
         except Exception as log_err:
             pass
         # #endregion
@@ -75,11 +79,14 @@ class ChronosVolatility(nn.Module):
         try:
             # #region agent log
             try:
+                import sys
                 log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
                 log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_entry = {"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:55", "message": "attempting_model_load", "data": {"model_id": model_id}, "hypothesisId": "A"}
                 with open(log_path, 'a') as f:
-                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:55", "message": "attempting_model_load", "data": {"model_id": model_id}, "hypothesisId": "A"}, f)
+                    json.dump(log_entry, f)
                     f.write('\n')
+                print(f"[DEBUG] attempting_model_load: model_id={model_id}", file=sys.stderr)
             except: pass
             # #endregion
             self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
