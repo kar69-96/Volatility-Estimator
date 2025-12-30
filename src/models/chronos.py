@@ -7,6 +7,7 @@ Output: Quantiles (q10, q50, q90) in log-variance space
 
 import torch
 import torch.nn as nn
+from pathlib import Path
 
 try:
     from transformers import AutoModelForSeq2SeqLM
@@ -60,18 +61,23 @@ class ChronosVolatility(nn.Module):
             debug_log.append({"location": "chronos.py:47", "message": "model_mapping_check", "data": {"has_mapping": hasattr(AutoModelForSeq2SeqLM, '_model_mapping'), "has_config_mapping": hasattr(AutoModelForSeq2SeqLM, '_config_mapping')}, "hypothesisId": "E"})
         except: pass
         try:
-            with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+            log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, 'a') as f:
                 for entry in debug_log:
                     json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", **entry}, f)
                     f.write('\n')
-        except: pass
+        except Exception as log_err:
+            pass
         # #endregion
             
         # Load pretrained Chronos - this will fail with a clear error if T5 is not available
         try:
             # #region agent log
             try:
-                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, 'a') as f:
                     json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:55", "message": "attempting_model_load", "data": {"model_id": model_id}, "hypothesisId": "A"}, f)
                     f.write('\n')
             except: pass
@@ -79,7 +85,9 @@ class ChronosVolatility(nn.Module):
             self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
             # #region agent log
             try:
-                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, 'a') as f:
                     json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:58", "message": "model_load_success", "data": {"model_type": type(self.base).__name__}, "hypothesisId": "A"}, f)
                     f.write('\n')
             except: pass
@@ -87,7 +95,9 @@ class ChronosVolatility(nn.Module):
         except ValueError as e:
             # #region agent log
             try:
-                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, 'a') as f:
                     json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:61", "message": "value_error_during_load", "data": {"error": str(e), "error_type": type(e).__name__}, "hypothesisId": "A"}, f)
                     f.write('\n')
             except: pass
@@ -106,7 +116,9 @@ class ChronosVolatility(nn.Module):
         except Exception as e:
             # #region agent log
             try:
-                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                log_path = Path(__file__).parent.parent.parent / '.cursor' / 'debug.log'
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, 'a') as f:
                     json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:73", "message": "exception_during_load", "data": {"error": str(e), "error_type": type(e).__name__}, "hypothesisId": "D"}, f)
                     f.write('\n')
             except: pass
