@@ -125,10 +125,10 @@ Deep learning features (Chronos predictions and training) benefit significantly 
 
 AI was used for supporting and supplementary tasks throughout the project:
 
--**Debugging**: AI (primarily Sonnet 4.5) was used for debugging all types of failures. Very useful in debugging issues with finetuning scripts, which was new to me.
--**Error Handling**: Used to create edge cases and fallbacks if primary approach does not work. LLMs (mainly Codex-mini) were very good at thinking through potential errors and providing fallbacks. 
--**Docs**: Used to compile information and create docs (README, SETUP.md, USAGE.md, LAMBDA_SETUP.md) and init files. Used Gemini Flash for this. 
--**Configurations**: Had trouble configuring complicated files, such as setup_lambda.sh or run.py for CLI commands. Opus 4.5 and Codex Max were useful in taking care of tedious tasks so I can focus on backend logic. 
+- **Debugging**: AI (primarily Sonnet 4.5) was used for debugging all types of failures. Very useful in debugging issues with finetuning scripts, which was new to me.
+- **Error Handling**: Used to create edge cases and fallbacks if primary approach does not work. LLMs (mainly Codex-mini) were very good at thinking through potential errors and providing fallbacks. 
+- **Docs**: Used to compile information and create docs (README, SETUP.md, USAGE.md, LAMBDA_SETUP.md) and init files. Used Gemini Flash for this. 
+- **Configurations**: Had trouble configuring complicated files, such as setup_lambda.sh or run.py for CLI commands. Opus 4.5 and Codex Max were useful in taking care of tedious tasks so I can focus on backend logic. 
 
 ## Drawbacks
 
@@ -150,5 +150,4 @@ AI was used for supporting and supplementary tasks throughout the project:
 
 - [SETUP.md](SETUP.md) - Installation and setup instructions
 - [USAGE.md](USAGE.md) - Comprehensive command reference and usage guide
-- [docs/LOCAL_TRAINING.md](docs/LOCAL_TRAINING.md) - Local training guide
 - [docs/LAMBDA_SETUP.md](docs/LAMBDA_SETUP.md) - Lambda Labs GPU setup guide
