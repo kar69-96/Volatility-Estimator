@@ -14,6 +14,8 @@ import pandas as pd
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 import subprocess
 import socket
+import requests
+from io import BytesIO
 
 from src.volatility.models.chronos import ChronosVolatility
 from src.volatility.training.data import prepare_raw_signal, compute_target, VolatilityDataset, create_weighted_sampler_for_concat_dataset
@@ -78,6 +80,62 @@ def get_lambda_instance_id():
     return None
 
 
+def detect_a100_and_optimize():
+    """
+    Detect A100 GPU and return optimized settings.
+    
+    Returns:
+        dict with batch_size, use_amp, num_workers, and device settings
+    """
+    # Set CUDA_VISIBLE_DEVICES=0 if on Lambda instance to ensure single GPU usage
+    # Do this BEFORE getting device to ensure proper GPU selection
+    if is_lambda_instance() and torch.cuda.is_available():
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    
+    device = get_device('auto')
+    batch_size = 32  # Default
+    use_amp = False  # Mixed precision
+    num_workers = 0  # Default (0 = main process)
+    
+    # Check if CUDA is available
+    if device.type == 'cuda' and torch.cuda.is_available():
+        # Get GPU name
+        gpu_name = torch.cuda.get_device_name(0).lower()
+        
+        # Detect A100 (40GB or 80GB)
+        if 'a100' in gpu_name:
+            print(f"✓ Detected A100 GPU: {torch.cuda.get_device_name(0)}")
+            batch_size = 128  # Larger batch size for A100
+            use_amp = True  # Enable mixed precision (FP16) for faster training
+            num_workers = 4  # Parallel data loading
+            print(f"  Optimizations enabled:")
+            print(f"    - Batch size: {batch_size} (increased from 32)")
+            print(f"    - Mixed precision (FP16): Enabled")
+            print(f"    - DataLoader workers: {num_workers}")
+            if is_lambda_instance():
+                print(f"    - CUDA_VISIBLE_DEVICES=0 (single GPU mode)")
+        elif 'a10' in gpu_name or 'v100' in gpu_name:
+            print(f"✓ Detected {torch.cuda.get_device_name(0)}")
+            batch_size = 64  # Medium batch size
+            use_amp = True
+            num_workers = 2
+            print(f"  Optimizations enabled:")
+            print(f"    - Batch size: {batch_size}")
+            print(f"    - Mixed precision (FP16): Enabled")
+        else:
+            print(f"✓ Detected GPU: {torch.cuda.get_device_name(0)}")
+            print(f"  Using default settings (batch_size={batch_size})")
+    else:
+        print(f"  Using CPU (no GPU optimizations)")
+    
+    return {
+        'batch_size': batch_size,
+        'use_amp': use_amp,
+        'num_workers': num_workers,
+        'device': device
+    }
+
+
 def terminate_lambda_instance(instance_id=None):
     """Terminate Lambda Labs instance after training completes."""
     # Check if auto-termination is disabled
@@ -132,14 +190,25 @@ def get_sp500_tickers():
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
         print(f"Fetching S&P 500 ticker list from Wikipedia...")
         
-        # Try with different backends
+        # Use requests with proper User-Agent header to avoid 403 errors
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Parse HTML with pandas - use BytesIO for better compatibility
+        html_content = BytesIO(response.content)
         try:
-            tables = pd.read_html(url, flavor='lxml')
+            tables = pd.read_html(html_content, flavor='lxml')
         except:
             try:
-                tables = pd.read_html(url, flavor='html5lib')
+                html_content.seek(0)  # Reset to beginning
+                tables = pd.read_html(html_content, flavor='html5lib')
             except:
-                tables = pd.read_html(url)
+                html_content.seek(0)  # Reset to beginning
+                tables = pd.read_html(html_content)
         
         sp500_table = tables[0]
         
@@ -320,22 +389,45 @@ def main():
     train_data = Subset(combined_dataset, train_indices.tolist())
     val_data = Subset(combined_dataset, val_indices.tolist())
     
+    # Detect A100 and optimize settings
+    print(f"\n{'='*60}")
+    print("GPU Detection and Optimization")
+    print(f"{'='*60}")
+    optimizations = detect_a100_and_optimize()
+    batch_size = optimizations['batch_size']
+    use_amp = optimizations['use_amp']
+    num_workers = optimizations['num_workers']
+    device = optimizations['device']
+    
     # Use weighted sampler for training to favor recent data
     # Note: WeightedRandomSampler requires replacement=True, so we can't use it with Subset
     # Instead, we'll use regular shuffle but the individual datasets already weight recent samples
     # For a proper weighted sampler with ConcatDataset, we'd need to restructure the code
-    train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
+    train_loader = DataLoader(
+        train_data, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=(device.type == 'cuda')  # Pin memory for faster GPU transfer
+    )
+    val_loader = DataLoader(
+        val_data, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=(device.type == 'cuda')
+    )
     
     # Model
-    device = get_device('auto')
     print(f"\nUsing device: {device}")
     
     model = ChronosVolatility(use_lora=True).to(device)
     
     # Train
     print("\nStarting training...")
-    model = train(model, train_loader, val_loader, epochs=50, lr=1e-4, device=device)
+    if use_amp:
+        print("  Mixed precision (FP16) training enabled for faster training")
+    model = train(model, train_loader, val_loader, epochs=50, lr=1e-4, device=device, use_amp=use_amp)
     
     # Save
     checkpoint_dir = Path('models/checkpoints')
