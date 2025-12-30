@@ -40,6 +40,7 @@ class ChronosVolatility(nn.Module):
         # Load pretrained Chronos
         try:
             self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        except ValueError as e:
             if "T5ForConditionalGeneration" in str(e) or "T5" in str(e):
                 raise ImportError(
                     f"T5 models are not available in your transformers installation. "
