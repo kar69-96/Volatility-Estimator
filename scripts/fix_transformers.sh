@@ -23,9 +23,21 @@ pip install --no-cache-dir transformers>=4.40.0
 echo "Step 4: Installing sentencepiece..."
 pip install --no-cache-dir sentencepiece>=0.1.99
 
+# Upgrade Pillow (required for newer transformers versions)
+echo "Step 5: Upgrading Pillow (PIL)..."
+pip install --no-cache-dir --upgrade Pillow>=9.0.0
+
 # Verify installation
-echo "Step 5: Verifying T5 availability..."
+echo "Step 6: Verifying T5 availability..."
 python3 -c "
+import PIL
+print(f'✓ Pillow version: {PIL.__version__}')
+from PIL import Image
+if hasattr(Image, 'Resampling'):
+    print('✓ PIL.Image.Resampling available')
+else:
+    print('✗ PIL.Image.Resampling NOT available - Pillow too old!')
+    exit(1)
 from transformers.models.t5 import T5ForConditionalGeneration
 print('✓ T5ForConditionalGeneration imported successfully')
 from transformers import AutoModelForSeq2SeqLM
