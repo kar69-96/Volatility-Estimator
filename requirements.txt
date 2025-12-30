@@ -55,6 +55,7 @@ transformers>=4.40.0
 peft>=0.6.0
 sentencepiece>=0.1.99
 accelerate>=0.20.0  # Required for transformers
+huggingface_hub>=0.20.0  # For model export and Hub integration
 
 # Image Processing (required for transformers 4.40+)
 Pillow>=9.0.0
