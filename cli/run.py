@@ -9,6 +9,9 @@ import argparse
 import sys
 from pathlib import Path
 
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pandas as pd
 import yaml
 
@@ -25,7 +28,8 @@ from src.prediction import (
     build_pattern_database,
     find_similar_events,
     predict_volatility_path,
-    backtest_predictions
+    backtest_predictions,
+    predict_volatility_chronos
 )
 from src.visualization import (
     export_to_excel,
@@ -34,8 +38,6 @@ from src.visualization import (
     generate_summary_report
 )
 from src.utils import load_events, setup_logging, parse_date
-
-# Add project root to path (already handled by package structure)
 
 
 def load_config(config_path: str = 'config.yaml') -> dict:
@@ -150,6 +152,19 @@ def main():
         help='Generate Excel report (auto-enabled if --output_dir specified)'
     )
 
+    parser.add_argument(
+        '--predict-chronos',
+        action='store_true',
+        help='Generate volatility predictions using Chronos model from Hugging Face'
+    )
+
+    parser.add_argument(
+        '--prediction-window',
+        type=int,
+        default=20,
+        help='Prediction window in days (default: 20, used with --predict-chronos)'
+    )
+
     args = parser.parse_args()
 
     # Load configuration
@@ -163,6 +178,91 @@ def main():
         log_level=log_level,
         console=log_config.get('console', True)
     )
+
+    # Chronos prediction mode (separate workflow - runs first if specified)
+    if args.predict_chronos:
+        try:
+            logger.info(f"Running Chronos volatility prediction for {args.symbol}")
+            logger.info(f"Prediction window: {args.prediction_window} days")
+            
+            # Get data config for date range
+            data_config = config.get('data', {})
+            # Use recent date range for predictions (need recent data for model)
+            from datetime import date
+            start_date = '2020-01-01'
+            end_date = date.today().strftime('%Y-%m-%d')
+            cache_dir = data_config.get('cache_dir', './data/cache')
+            cache_format = data_config.get('cache_format', 'parquet')
+            
+            # Load market data
+            logger.info(f"Loading market data for {args.symbol}...")
+            df = get_market_data(
+                symbol=args.symbol,
+                start_date=start_date,
+                end_date=end_date,
+                use_cache=True,
+                cache_dir=cache_dir,
+                cache_format=cache_format
+            )
+            
+            # Run prediction
+            prediction_result = predict_volatility_chronos(
+                df=df,
+                prediction_window=args.prediction_window,
+                device='auto'
+            )
+            
+            if 'error' in prediction_result:
+                logger.error(f"Prediction failed: {prediction_result['error']}")
+                sys.exit(1)
+            
+            # Print results
+            volatility_list = prediction_result['volatility']
+            dates_list = prediction_result['dates']
+            
+            print("\n" + "="*70)
+            print(f"Chronos Volatility Prediction: {args.symbol}")
+            print("="*70)
+            print(f"Prediction Window: {args.prediction_window} days")
+            print(f"Model: karkar69/chronos-volatility")
+            print(f"Device: {prediction_result['model_info']['device']}")
+            print("\n" + "-"*70)
+            print("Predicted Volatility (Annualized %):")
+            print("-"*70)
+            print(f"{'Date':<12} {'Volatility':>12} {'Lower (q10)':>12} {'Upper (q90)':>12}")
+            print("-"*70)
+            
+            for i, (date, vol) in enumerate(zip(dates_list, volatility_list)):
+                lower = prediction_result['lower'][i] if i < len(prediction_result['lower']) else vol
+                upper = prediction_result['upper'][i] if i < len(prediction_result['upper']) else vol
+                print(f"{date:<12} {vol:>12.2f} {lower:>12.2f} {upper:>12.2f}")
+            
+            print("="*70)
+            
+            # Save to output directory if specified
+            if args.output_dir:
+                output_path = Path(args.output_dir)
+                output_path.mkdir(parents=True, exist_ok=True)
+                output_file = output_path / f"{args.symbol}_chronos_predictions.csv"
+                
+                # Create DataFrame
+                output_df = pd.DataFrame({
+                    'date': dates_list,
+                    'volatility': volatility_list,
+                    'lower': prediction_result['lower'],
+                    'upper': prediction_result['upper']
+                })
+                output_df.to_csv(output_file, index=False)
+                logger.info(f"Predictions saved to {output_file}")
+            
+            # Exit early if only Chronos prediction requested
+            sys.exit(0)
+                
+        except Exception as e:
+            logger.error(f"Chronos prediction failed: {str(e)}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            sys.exit(1)
 
     logger.info(f"Starting volatility estimation for {args.symbol}")
 

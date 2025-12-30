@@ -23,4 +23,4 @@ fi
 
 # Run Streamlit
 echo "Starting Streamlit server on http://localhost:8501"
-streamlit run src/app.py --server.port 8501 --server.address localhost
+streamlit run frontend/app.py --server.port 8501 --server.address localhost

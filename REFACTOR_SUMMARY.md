@@ -131,7 +131,7 @@ Successfully reorganized the `/src` folder structure to be more modular, maintai
 - **Moved**: `run.py` from `src/` to `cli/`
 - **Updated**: All imports to use new module structure
 
-### 10. **Main App** (`src/app.py`)
+### 10. **Main App** (`frontend/app.py`)
 - **Updated**: All imports to use new module structure:
   - `src.analysis` for comparison functions
   - `src.data` for data loading and returns

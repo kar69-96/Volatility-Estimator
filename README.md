@@ -30,7 +30,7 @@ python3.10 -m venv venv310
 source venv310/bin/activate
 pip install -r requirements.txt
 
-streamlit run src/app.py
+streamlit run frontend/app.py
 ```
 
 Or use the provided script:

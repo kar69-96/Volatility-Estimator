@@ -1,8 +1,6 @@
 """
 Hyperminimalistic Volatility Estimator Frontend.
 
-Core Design Principle:
-Separate "What am I analyzing?" from "How am I analyzing it?"
 
 Navigation Structure:
 [ Single Asset ] [ Asset Comparison ]
@@ -21,7 +19,7 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-# Plotly import (optional)
+# Plotly import
 try:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -54,6 +52,7 @@ from src.prediction import (
     predict_volatility_dl,
     predict_neural_garch,
     analyze_fed_rate_scenario,
+    predict_volatility_chronos,
 )
 from src.visualization import (
     calculate_historical_volatility,
@@ -668,7 +667,7 @@ def render_single_asset_forecasting():
     st.subheader("Forecast Configuration")
     col1, col2 = st.columns(2)
     with col1:
-        forecast_type = st.selectbox("Forecast Type", ["iTransformer", "Neural GARCH"], key="forecast_type_select")
+        forecast_type = st.selectbox("Forecast Type", ["Chronos", "iTransformer", "Neural GARCH"], key="forecast_type_select")
     with col2:
         # Show horizon input for both forecast types
         horizon = st.number_input("Forecast Horizon (days)", min_value=1, max_value=252, value=20, step=1, key="forecast_horizon_input")
@@ -691,7 +690,22 @@ def render_single_asset_forecasting():
     # Generate forecast button
     if st.button("Generate Forecast", type="primary", key="forecast_generate_btn"):
         with st.spinner("Generating forecast..."):
-            if include_fed_rate:
+            if forecast_type == "Chronos":
+                result = predict_volatility_chronos(
+                    df=df,
+                    prediction_window=horizon if horizon else 20,
+                    device='auto'
+                )
+                if 'error' not in result:
+                    st.session_state['forecast_result'] = result
+                    st.session_state['forecast_type'] = 'chronos'
+                    st.session_state['forecast_horizon'] = horizon if horizon else 20
+                else:
+                    error_msg = result.get('error', 'Unknown error')
+                    st.error(f"Forecast failed: {error_msg}")
+                    with st.expander("Error Details"):
+                        st.code(error_msg)
+            elif include_fed_rate:
                 # Use Fed rate scenario analysis
                 result = analyze_fed_rate_scenario(
                     stock_df=df,
@@ -868,7 +882,210 @@ def render_single_asset_forecasting():
             # Historical volatility is in decimal form, convert to percentage
             current_vol = float(hist_vol.iloc[-1]) * 100 if len(hist_vol) > 0 else 0.0
         
-        if forecast_type_display == 'fed_rate' and 'results' in result:
+        if forecast_type_display == 'chronos' and 'volatility' in result:
+            # Chronos model results
+            volatility_list = result['volatility']
+            dates_list = result['dates']
+            lower_list = result.get('lower', [])
+            upper_list = result.get('upper', [])
+            
+            # Get current volatility from historical data
+            try:
+                from src.data.returns import calculate_returns
+                returns = calculate_returns(df['close'])
+                current_vol = returns.rolling(window=20).std().iloc[-1] * np.sqrt(252) * 100
+            except:
+                current_vol = volatility_list[0] if len(volatility_list) > 0 else 0.0
+            
+            # Use median prediction for display
+            main_forecast = volatility_list[len(volatility_list)//2] if len(volatility_list) > 0 else current_vol
+            
+            # Key Metrics Dashboard
+            st.subheader("Key Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Current Volatility", f"{current_vol:.2f}%")
+            with col2:
+                st.metric("Forecast Value (Median)", f"{main_forecast:.2f}%")
+            with col3:
+                change = main_forecast - current_vol
+                st.metric("Change", f"{change:+.2f}%", delta=f"{change:+.2f}%")
+            with col4:
+                # Convert hist_vol to percentage for regime classification
+                hist_vol_pct_for_regime = hist_vol * 100 if len(hist_vol) > 0 else pd.Series(dtype=float)
+                regime, _ = classify_volatility_regime(main_forecast, hist_vol_pct_for_regime)
+                st.metric("Forecast Regime", regime)
+            
+            # Forecast Chart
+            if not PLOTLY_AVAILABLE:
+                st.warning("Plotly required for charts. Install with: pip install plotly")
+            elif len(hist_vol) == 0:
+                st.warning("Unable to calculate historical volatility for chart display.")
+            else:
+                # Convert historical volatility from decimal to percentage
+                hist_vol_pct = hist_vol * 100
+                
+                try:
+                    # Normalize x-axis: today - forecast_horizon to today + forecast_horizon
+                    today = pd.Timestamp.today().normalize()
+                    x_axis_start = today - pd.Timedelta(days=horizon_display)
+                    x_axis_end = today + pd.Timedelta(days=horizon_display)
+                    
+                    # Filter historical data to x_axis_start to today
+                    hist_vol_pct.index = pd.to_datetime(hist_vol_pct.index)
+                    hist_vol_filtered = hist_vol_pct[(hist_vol_pct.index >= x_axis_start) & (hist_vol_pct.index <= today)]
+                    
+                    # Ensure historical data extends to today
+                    if len(hist_vol_filtered) > 0:
+                        last_date = hist_vol_filtered.index[-1]
+                        if last_date < today:
+                            last_value = hist_vol_filtered.iloc[-1]
+                            hist_vol_filtered = pd.concat([hist_vol_filtered, pd.Series([last_value], index=[today])])
+                        elif last_date > today:
+                            hist_vol_filtered = hist_vol_filtered[hist_vol_filtered.index <= today]
+                    else:
+                        hist_vol_filtered = pd.Series([0], index=[today])
+                    
+                    hist_x, hist_y = clean_series_for_plotly(hist_vol_filtered)
+                    today_date = today
+                    
+                    # Forecast dates
+                    forecast_dates = [pd.to_datetime(d) for d in dates_list]
+                    
+                    fig = go.Figure()
+                    
+                    # Historical volatility
+                    fig.add_trace(go.Scatter(
+                        x=hist_x,
+                        y=hist_y,
+                        mode='lines',
+                        name='Historical Volatility',
+                        line=dict(color='#000000', width=1.5)
+                    ))
+                    
+                    # Current marker
+                    fig.add_trace(go.Scatter(
+                        x=[hist_x[-1]],
+                        y=[hist_y[-1]],
+                        mode='markers',
+                        name='Current',
+                        marker=dict(color='#000000', size=10, symbol='circle')
+                    ))
+                    
+                    # Forecast line
+                    fig.add_trace(go.Scatter(
+                        x=forecast_dates,
+                        y=volatility_list,
+                        mode='lines',
+                        name='Chronos Forecast',
+                        line=dict(color='#333333', width=2, dash='dot')
+                    ))
+                    
+                    # Confidence intervals
+                    if len(lower_list) == len(volatility_list) and len(upper_list) == len(volatility_list):
+                        fig.add_trace(go.Scatter(
+                            x=forecast_dates + forecast_dates[::-1],
+                            y=upper_list + lower_list[::-1],
+                            fill='toself',
+                            fillcolor='rgba(100,100,100,0.2)',
+                            line=dict(color='rgba(255,255,255,0)'),
+                            name='80% Confidence Interval',
+                            showlegend=True
+                        ))
+                    
+                    # Vertical separator at today
+                    fig.add_vline(
+                        x=today_date,
+                        line_dash="dot",
+                        line_color="#999999",
+                        line_width=1
+                    )
+                    
+                    # Calculate y-axis range
+                    all_y = hist_y + volatility_list
+                    if lower_list:
+                        all_y.extend(lower_list)
+                    if upper_list:
+                        all_y.extend(upper_list)
+                    y_min, y_max = calculate_y_axis_range(all_y)
+                    
+                    fig.update_layout(
+                        title="",
+                        xaxis_title="",
+                        yaxis_title="Volatility (%)",
+                        yaxis=dict(range=[y_min, y_max]),
+                        xaxis=dict(range=[x_axis_start, x_axis_end]),
+                        plot_bgcolor='white',
+                        paper_bgcolor='white',
+                        font=dict(color='black', size=11),
+                        margin=dict(l=40, r=20, t=20, b=40),
+                        hovermode='x unified',
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error creating Chronos forecast chart: {str(e)}")
+                    with st.expander("Error Details"):
+                        import traceback
+                        st.code(traceback.format_exc())
+            
+            # Statistical Summary Table
+            with st.expander("Statistical Summary", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Historical Context**")
+                    stats = calculate_forecast_statistics(hist_vol, main_forecast, current_vol)
+                    stats_data = {
+                        'Metric': ['30-day Average', '60-day Average', '90-day Average', 'Current Volatility', 'Forecast Volatility'],
+                        'Value (%)': [
+                            f"{stats['avg_30d']:.2f}",
+                            f"{stats['avg_60d']:.2f}",
+                            f"{stats['avg_90d']:.2f}",
+                            f"{stats['current_volatility']:.2f}",
+                            f"{stats['forecast_volatility']:.2f}"
+                        ]
+                    }
+                    st.dataframe(pd.DataFrame(stats_data), use_container_width=True, hide_index=True)
+                
+                with col2:
+                    st.write("**Forecast Details**")
+                    percentile_info = calculate_percentile_ranking(main_forecast, hist_vol)
+                    details_data = {
+                        'Metric': ['Forecast Value', 'Percentile Ranking', 'Change from Current', 'Change Percentage'],
+                        'Value': [
+                            f"{main_forecast:.2f}%",
+                            f"{percentile_info['percentile']:.1f}th percentile",
+                            f"{stats['change_abs']:+.2f}%",
+                            f"{stats['change_pct']:+.2f}%"
+                        ]
+                    }
+                    st.dataframe(pd.DataFrame(details_data), use_container_width=True, hide_index=True)
+            
+            # Model Information Panel
+            with st.expander("Model Information", expanded=False):
+                model_info = result.get('model_info', {})
+                st.write(f"**Model Type:** Chronos (karkar69/chronos-volatility)")
+                st.write(f"**Prediction Horizon:** {horizon_display} days")
+                if 'device' in model_info:
+                    st.write(f"**Device:** {model_info['device']}")
+            
+            # Export Functionality
+            if st.button("Download Forecast", type="primary", key="chronos_download"):
+                export_df = pd.DataFrame({
+                    'Date': dates_list,
+                    'Volatility': volatility_list,
+                    'Lower': lower_list,
+                    'Upper': upper_list
+                })
+                csv = export_df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"chronos_forecast_{symbol}_{pd.Timestamp.today().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+        
+        elif forecast_type_display == 'fed_rate' and 'results' in result:
             # Fed rate scenario results
             results = result['results']
             baseline_vol = results.get('baseline_volatility', 0)

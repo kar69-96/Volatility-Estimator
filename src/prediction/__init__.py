@@ -17,6 +17,7 @@ from src.prediction.predictions import (
     analyze_fed_rate_scenario,
     build_pattern_database,
     backtest_predictions,
+    predict_volatility_chronos,
 )
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     'analyze_fed_rate_scenario',
     'build_pattern_database',
     'backtest_predictions',
+    'predict_volatility_chronos',
 ]
 
