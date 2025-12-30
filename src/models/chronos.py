@@ -35,11 +35,63 @@ class ChronosVolatility(nn.Module):
         super().__init__()
         if not _TRANSFORMERS_AVAILABLE:
             raise ImportError("Transformers library is required. Install with: pip install transformers>=4.40.0")
+        
+        # #region agent log
+        import json
+        import os
+        debug_log = []
+        try:
+            import transformers
+            debug_log.append({"location": "chronos.py:34", "message": "transformers_version", "data": {"version": transformers.__version__}, "hypothesisId": "A"})
+        except: pass
+        try:
+            from transformers.models import t5
+            t5_attrs = [x for x in dir(t5) if 'T5' in x and not x.startswith('_')]
+            debug_log.append({"location": "chronos.py:38", "message": "t5_module_contents", "data": {"available_classes": t5_attrs, "has_init": hasattr(t5, '__init__')}, "hypothesisId": "B"})
+        except Exception as e:
+            debug_log.append({"location": "chronos.py:40", "message": "t5_import_error", "data": {"error": str(e)}, "hypothesisId": "B"})
+        try:
+            from transformers.models.t5 import modeling_t5
+            modeling_attrs = [x for x in dir(modeling_t5) if 'T5' in x and not x.startswith('_')]
+            debug_log.append({"location": "chronos.py:43", "message": "t5_modeling_contents", "data": {"available_classes": modeling_attrs}, "hypothesisId": "C"})
+        except Exception as e:
+            debug_log.append({"location": "chronos.py:45", "message": "t5_modeling_import_error", "data": {"error": str(e)}, "hypothesisId": "C"})
+        try:
+            debug_log.append({"location": "chronos.py:47", "message": "model_mapping_check", "data": {"has_mapping": hasattr(AutoModelForSeq2SeqLM, '_model_mapping'), "has_config_mapping": hasattr(AutoModelForSeq2SeqLM, '_config_mapping')}, "hypothesisId": "E"})
+        except: pass
+        try:
+            with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                for entry in debug_log:
+                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", **entry}, f)
+                    f.write('\n')
+        except: pass
+        # #endregion
             
         # Load pretrained Chronos - this will fail with a clear error if T5 is not available
         try:
+            # #region agent log
+            try:
+                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:55", "message": "attempting_model_load", "data": {"model_id": model_id}, "hypothesisId": "A"}, f)
+                    f.write('\n')
+            except: pass
+            # #endregion
             self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+            # #region agent log
+            try:
+                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:58", "message": "model_load_success", "data": {"model_type": type(self.base).__name__}, "hypothesisId": "A"}, f)
+                    f.write('\n')
+            except: pass
+            # #endregion
         except ValueError as e:
+            # #region agent log
+            try:
+                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:61", "message": "value_error_during_load", "data": {"error": str(e), "error_type": type(e).__name__}, "hypothesisId": "A"}, f)
+                    f.write('\n')
+            except: pass
+            # #endregion
             if "T5ForConditionalGeneration" in str(e) or "T5" in str(e):
                 raise ImportError(
                     f"T5 models are not available in your transformers installation. "
@@ -52,6 +104,13 @@ class ChronosVolatility(nn.Module):
                 f"Original error: {e}"
             )
         except Exception as e:
+            # #region agent log
+            try:
+                with open('/Users/karthikreddy/Downloads/GitHub/Demos/Volatility-Estimator/.cursor/debug.log', 'a') as f:
+                    json.dump({"timestamp": int(__import__('time').time() * 1000), "sessionId": "debug-session", "runId": "pre_load", "location": "chronos.py:73", "message": "exception_during_load", "data": {"error": str(e), "error_type": type(e).__name__}, "hypothesisId": "D"}, f)
+                    f.write('\n')
+            except: pass
+            # #endregion
             raise RuntimeError(
                 f"Failed to load Chronos model '{model_id}'. "
                 f"Make sure transformers>=4.40.0 and sentencepiece are installed. "
