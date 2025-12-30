@@ -21,10 +21,11 @@ plotly>=5.17.0         # Interactive charts
 # Deep Learning Dependencies (PyTorch)
 torch>=2.0.0           # PyTorch deep learning framework
 torchaudio>=2.0.0      # PyTorch audio processing (must match torch version)
-# Note: For GPU support with matching versions, install both from PyTorch index:
-# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+torchvision>=0.15.0    # PyTorch vision (must match torch CUDA version)
+# Note: For GPU support with matching versions, install all from PyTorch index:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # or for CUDA 12.1:
-# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Transformers and Chronos
 transformers>=4.40.0   # Hugging Face transformers (for Chronos - requires T5 support)

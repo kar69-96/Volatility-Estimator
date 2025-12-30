@@ -27,9 +27,33 @@ pip install --no-cache-dir sentencepiece>=0.1.99
 echo "Step 5: Upgrading Pillow (PIL)..."
 pip install --no-cache-dir --upgrade Pillow>=9.0.0
 
+# Fix torchvision CUDA version mismatch (must match PyTorch CUDA version)
+echo "Step 6: Checking PyTorch CUDA version..."
+PYTORCH_CUDA=$(python3 -c "import torch; print(torch.version.cuda)" 2>/dev/null || echo "11.8")
+echo "  Detected PyTorch CUDA version: $PYTORCH_CUDA"
+echo "  Reinstalling torchvision to match PyTorch CUDA version..."
+pip uninstall torchvision -y || true
+if [[ "$PYTORCH_CUDA" == "11.8" ]] || [[ "$PYTORCH_CUDA" == "11"* ]]; then
+    pip install --no-cache-dir torchvision --index-url https://download.pytorch.org/whl/cu118
+elif [[ "$PYTORCH_CUDA" == "12.1" ]] || [[ "$PYTORCH_CUDA" == "12"* ]]; then
+    pip install --no-cache-dir torchvision --index-url https://download.pytorch.org/whl/cu121
+else
+    pip install --no-cache-dir torchvision
+fi
+
 # Verify installation
-echo "Step 6: Verifying T5 availability..."
+echo "Step 7: Verifying installation..."
 python3 -c "
+import torch
+print(f'✓ PyTorch version: {torch.__version__}')
+print(f'✓ PyTorch CUDA version: {torch.version.cuda}')
+try:
+    import torchvision
+    print(f'✓ torchvision version: {torchvision.__version__}')
+    print('✓ torchvision imported successfully')
+except Exception as e:
+    print(f'✗ torchvision import failed: {e}')
+    exit(1)
 import PIL
 print(f'✓ Pillow version: {PIL.__version__}')
 from PIL import Image
