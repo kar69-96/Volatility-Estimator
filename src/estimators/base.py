@@ -104,3 +104,10 @@ class BaseEstimator(ABC):
         else:
             return daily_vol
 
+
+
+
+
+
+
+

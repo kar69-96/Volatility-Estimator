@@ -28,7 +28,7 @@ import pandas as pd
 
 from src.estimators.base import BaseEstimator
 from src.estimators.rogers_satchell import RogersSatchellEstimator
-from src.returns import calculate_overnight_returns, calculate_open_returns
+from src.data.returns import calculate_overnight_returns, calculate_open_returns
 
 
 class YangZhangEstimator(BaseEstimator):
@@ -108,4 +108,5 @@ class YangZhangEstimator(BaseEstimator):
         volatility = np.sqrt(variance)
 
         return volatility
+
 

@@ -27,7 +27,7 @@ import pandas as pd
 
 from src.estimators.base import BaseEstimator
 from src.estimators.close_to_close import CloseToCloseEstimator
-from src.returns import calculate_returns
+from src.data.returns import calculate_returns
 from src.utils import validate_numeric_range
 
 
@@ -127,4 +127,5 @@ class EWMAEstimator(BaseEstimator):
         volatility = np.sqrt(variance)
 
         return volatility
+
 

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from src.estimators.base import BaseEstimator
-from src.returns import calculate_ranges
+from src.data.returns import calculate_ranges
 
 
 class RogersSatchellEstimator(BaseEstimator):
@@ -91,4 +91,5 @@ class RogersSatchellEstimator(BaseEstimator):
         volatility = np.sqrt(variance)
 
         return volatility
+
 

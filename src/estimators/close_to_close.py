@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from src.estimators.base import BaseEstimator
-from src.returns import calculate_returns
+from src.data.returns import calculate_returns
 
 
 class CloseToCloseEstimator(BaseEstimator):
@@ -67,4 +67,5 @@ class CloseToCloseEstimator(BaseEstimator):
         volatility = np.sqrt(rolling_var)
 
         return volatility
+
 
