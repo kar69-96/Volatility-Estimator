@@ -24,8 +24,9 @@ torch>=2.0.0           # PyTorch deep learning framework
 # pip install torch --index-url https://download.pytorch.org/whl/cu118
 
 # Transformers and Chronos
-transformers>=4.35.0   # Hugging Face transformers (for Chronos)
+transformers>=4.40.0   # Hugging Face transformers (for Chronos - requires T5 support)
 peft>=0.6.0            # Parameter-Efficient Fine-Tuning (LoRA)
+sentencepiece>=0.1.99  # Required for T5 tokenization
 
 # Feature Engineering
 scikit-learn>=1.3.0    # Feature scaling and preprocessing

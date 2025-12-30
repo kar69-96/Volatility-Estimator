@@ -10,9 +10,16 @@ import torch.nn as nn
 
 try:
     from transformers import AutoModelForSeq2SeqLM
+    # Verify T5 models are available
+    try:
+        from transformers.models.t5 import T5ForConditionalGeneration
+        _T5_AVAILABLE = True
+    except ImportError:
+        _T5_AVAILABLE = False
     _TRANSFORMERS_AVAILABLE = True
 except ImportError:
     _TRANSFORMERS_AVAILABLE = False
+    _T5_AVAILABLE = False
 
 try:
     from peft import LoraConfig, get_peft_model
@@ -34,10 +41,24 @@ class ChronosVolatility(nn.Module):
     def __init__(self, model_id='amazon/chronos-t5-mini', use_lora=True):
         super().__init__()
         if not _TRANSFORMERS_AVAILABLE:
-            raise ImportError("Transformers library is required. Install with: pip install transformers")
+            raise ImportError("Transformers library is required. Install with: pip install transformers>=4.40.0")
+        
+        if not _T5_AVAILABLE:
+            raise ImportError(
+                "T5 models are not available in your transformers installation. "
+                "This usually means transformers is too old or incomplete. "
+                "Try: pip install --upgrade transformers>=4.40.0 sentencepiece"
+            )
             
         # Load pretrained Chronos
-        self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        try:
+            self.base = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load Chronos model '{model_id}'. "
+                f"Make sure transformers>=4.40.0 is installed and T5 models are available. "
+                f"Original error: {e}"
+            )
         self.model_id = model_id
         
         # Get hidden dimension from config
