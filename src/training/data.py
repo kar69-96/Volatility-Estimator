@@ -49,7 +49,11 @@ def compute_target(returns, horizon=20):
     realized_variance = squared_returns.rolling(window=horizon).sum()
     # Shift backward by h: at time t, we predict variance for [t+1, t+h]
     # So target[t] = log(Σr² from t+1 to t+h)
-    target = np.log(realized_variance.shift(-horizon) + 1e-8)
+    # Use larger epsilon and clip to prevent log(0) and extreme values
+    target = np.log(np.clip(realized_variance.shift(-horizon) + 1e-6, a_min=1e-6, a_max=1e6))
+    # Replace any remaining NaN/inf with a reasonable default (log of small variance)
+    target = target.replace([np.inf, -np.inf], np.log(1e-6))
+    target = target.fillna(np.log(1e-6))
     return target
 
 
@@ -94,12 +98,20 @@ class VolatilityDataset(Dataset):
         seq_end = idx + self.seq_length
         raw_seq = self.raw_signal[idx:seq_end].astype(np.float32)
         
+        # Replace NaN/inf with small positive value
+        raw_seq = np.nan_to_num(raw_seq, nan=1e-8, posinf=1.0, neginf=1e-8)
+        raw_seq = np.clip(raw_seq, a_min=0.0, a_max=1e6)  # Clip extreme values
+        
         # Convert to tensor - shape (seq_length,)
         input_tensor = torch.FloatTensor(raw_seq)
         
         # Target: log-realized variance for period starting at seq_end
         target_idx = seq_end  # Target is aligned with end of input sequence
         y = self.target[target_idx]
+        
+        # Replace NaN/inf in target
+        if np.isnan(y) or np.isinf(y):
+            y = np.log(1e-6)  # Default to log of small variance
         
         return input_tensor, torch.FloatTensor([y])
 
