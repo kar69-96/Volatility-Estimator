@@ -120,9 +120,9 @@ with torch.no_grad():
 quantiles_var = np.exp(quantiles_log_var.numpy())
 quantiles_vol = np.sqrt(quantiles_var) * np.sqrt(252)  # Annualized %
 
-print(f"10th percentile: {quantiles_vol[0][0]:.2f}%")
-print(f"Median: {quantiles_vol[0][1]:.2f}%")
-print(f"90th percentile: {quantiles_vol[0][2]:.2f}%")
+print(f"10th percentile: {{quantiles_vol[0][0]:.2f}}%")
+print(f"Median: {{quantiles_vol[0][1]:.2f}}%")
+print(f"90th percentile: {{quantiles_vol[0][2]:.2f}}%")
 ```
 
 ## Training Details
