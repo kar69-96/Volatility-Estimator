@@ -17,6 +17,8 @@ from src.models.chronos import ChronosVolatility
 from src.training.data import prepare_raw_signal, compute_target, VolatilityDataset
 from src.training.finetune import train
 from src.models.base_model import get_device
+from src.data.data_loader import get_market_data
+from datetime import datetime, timedelta
 
 
 def main():
@@ -30,13 +32,33 @@ def main():
     
     # Load and prepare training data (cross-ticker)
     train_datasets = []
+    
+    # Date range for downloading data (last 10 years should be sufficient)
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=365 * 10)).strftime('%Y-%m-%d')
+    
     for ticker in train_tickers:
         data_path = data_dir / f'{ticker}.parquet'
+        
+        # If cache file doesn't exist, download data
         if not data_path.exists():
-            print(f"Warning: {data_path} not found, skipping {ticker}")
-            continue
-            
-        df = pd.read_parquet(data_path)
+            print(f"Cache file not found for {ticker}, downloading data...")
+            try:
+                df = get_market_data(
+                    symbol=ticker,
+                    start_date=start_date,
+                    end_date=end_date,
+                    use_cache=True,
+                    cache_dir=str(data_dir),
+                    cache_format='parquet'
+                )
+                print(f"Downloaded {ticker}: {len(df)} rows")
+            except Exception as e:
+                print(f"Error downloading {ticker}: {e}, skipping...")
+                continue
+        else:
+            # Load from cache
+            df = pd.read_parquet(data_path)
         
         # Ensure date column exists and set as index for alignment
         if 'date' in df.columns:
@@ -122,7 +144,21 @@ def main():
         # TODO: Run evaluation on held-out ticker
         print(f"Test data loaded for {held_out_ticker}")
     else:
-        print(f"Warning: {test_path} not found, skipping held-out test")
+        print(f"Cache file not found for {held_out_ticker}, downloading data...")
+        try:
+            test_df = get_market_data(
+                symbol=held_out_ticker,
+                start_date=start_date,
+                end_date=end_date,
+                use_cache=True,
+                cache_dir=str(data_dir),
+                cache_format='parquet'
+            )
+            print(f"Downloaded {held_out_ticker}: {len(test_df)} rows")
+            # TODO: Run evaluation on held-out ticker
+            print(f"Test data loaded for {held_out_ticker}")
+        except Exception as e:
+            print(f"Warning: Failed to download {held_out_ticker}: {e}, skipping held-out test")
 
 
 if __name__ == '__main__':
