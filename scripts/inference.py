@@ -10,10 +10,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import pandas as pd
 
-from src.models.chronos import ChronosVolatility
-from src.prediction.inference import predict
-from src.training.data import prepare_raw_signal
-from src.models.base_model import get_device
+from src.volatility.models.chronos import ChronosVolatility
+from src.volatility.prediction.inference import predict
+from src.volatility.training.data import prepare_raw_signal
+from src.volatility.models.base_model import get_device
 
 
 def main(ticker='AAPL'):
@@ -26,13 +26,14 @@ def main(ticker='AAPL'):
     
     df = pd.read_parquet(data_path)
     
-    # Prepare raw signal (last 60 days of squared returns)
+    # Prepare raw signal (last 252 days = 1 year of squared returns)
+    seq_length = 252  # Match training sequence length
     raw_signal = prepare_raw_signal(df)
-    if len(raw_signal) < 60:
-        print(f"Error: Not enough data. Need at least 60 days, got {len(raw_signal)}")
+    if len(raw_signal) < seq_length:
+        print(f"Error: Not enough data. Need at least {seq_length} days, got {len(raw_signal)}")
         return
     
-    context = raw_signal.iloc[-60:].values  # Last 60 days
+    context = raw_signal.iloc[-seq_length:].values  # Last 252 days (1 year)
     
     # Load model
     device = get_device('auto')

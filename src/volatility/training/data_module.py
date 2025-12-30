@@ -33,7 +33,7 @@ class TimeSeriesDataset:
         self,
         features: np.ndarray,
         targets: np.ndarray,
-        seq_length: int = 60,
+        seq_length: int = 252,
         prediction_horizon: int = 1,
     ):
         """
@@ -92,7 +92,7 @@ class MultiHorizonDataset:
         self,
         features: np.ndarray,
         targets: np.ndarray,
-        seq_length: int = 60,
+        seq_length: int = 252,
         horizons: List[int] = None,
     ):
         """
@@ -148,7 +148,7 @@ class VolatilityDataModule:
         self,
         df: pd.DataFrame,
         target_column: str = 'realized_vol_20d',
-        seq_length: int = 60,
+        seq_length: int = 252,
         prediction_horizons: List[int] = None,
         train_ratio: float = 0.7,
         val_ratio: float = 0.15,

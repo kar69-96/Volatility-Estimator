@@ -44,7 +44,7 @@ def test_model_loading():
     """Test that the Chronos model can be loaded."""
     print("\nTesting model loading...")
     try:
-        from src.models.chronos import ChronosVolatility
+        from src.volatility.models.chronos import ChronosVolatility
         print("  Attempting to load Chronos model (this may download the model)...")
         # Try to load without LoRA first to test basic loading
         model = ChronosVolatility(use_lora=False)
@@ -83,7 +83,7 @@ def test_data_loading():
         print(f"    Columns: {list(df.columns)}")
         
         # Test data preparation
-        from src.training.data import prepare_raw_signal, compute_target
+        from src.volatility.training.data import prepare_raw_signal, compute_target
         
         raw_signal = prepare_raw_signal(df)
         print(f"  ✓ Prepared raw signal: {len(raw_signal)} values")
@@ -94,8 +94,8 @@ def test_data_loading():
         print(f"  ✓ Computed targets: {len(target)} values")
         
         # Test dataset creation
-        from src.training.data import VolatilityDataset
-        dataset = VolatilityDataset(raw_signal, target, seq_length=60, horizon=20)
+        from src.volatility.training.data import VolatilityDataset
+        dataset = VolatilityDataset(raw_signal, target, seq_length=252, horizon=20)
         print(f"  ✓ Created dataset: {len(dataset)} samples")
         
         if len(dataset) > 0:

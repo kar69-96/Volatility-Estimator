@@ -14,7 +14,7 @@ def predict(model, raw_signal, device='cuda'):
     
     Args:
         model: Trained ChronosVolatility model
-        raw_signal: Squared returns (single-channel time series, last 60 days)
+        raw_signal: Squared returns (single-channel time series, last 252 days = 1 year)
                    Can be numpy array, list, or torch tensor
         device: Device for inference
     

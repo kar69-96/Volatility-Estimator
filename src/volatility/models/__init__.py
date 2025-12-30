@@ -3,10 +3,9 @@ Deep Learning Models for Volatility Prediction.
 
 This package contains PyTorch models for:
 - Forward realized volatility prediction (Chronos)
-- Fed rate event prediction (LSTM/Transformer)
 """
 
-from src.models.base_model import (
+from src.volatility.models.base_model import (
     get_device,
     to_device,
     set_seed,
@@ -14,7 +13,7 @@ from src.models.base_model import (
 )
 
 try:
-    from src.models.chronos import ChronosVolatility
+    from src.volatility.models.chronos import ChronosVolatility
     _CHRONOS_AVAILABLE = True
 except ImportError:
     _CHRONOS_AVAILABLE = False

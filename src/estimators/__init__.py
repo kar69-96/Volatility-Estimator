@@ -7,7 +7,6 @@ This package contains implementations of various volatility estimators:
 - Parkinson: Range-based estimator using high/low
 - Rogers-Satchell: Range-based estimator accounting for drift
 - Yang-Zhang: Comprehensive range-based estimator
-- Neural GARCH: Neural network-based conditional variance estimation
 """
 
 from src.estimators.base import BaseEstimator as VolatilityEstimator
@@ -23,20 +22,6 @@ from src.estimators.factory import (
     ESTIMATORS,
 )
 
-# Neural GARCH import (optional - requires PyTorch)
-try:
-    from src.estimators.neural_garch import NeuralGARCHEstimator
-    _NEURAL_GARCH_AVAILABLE = True
-except ImportError:
-    NeuralGARCHEstimator = None
-    _NEURAL_GARCH_AVAILABLE = False
-
-
-def is_neural_garch_available() -> bool:
-    """Check if Neural GARCH estimator is available."""
-    return _NEURAL_GARCH_AVAILABLE
-
-
 __all__ = [
     'VolatilityEstimator',
     'CloseToCloseEstimator',
@@ -44,10 +29,8 @@ __all__ = [
     'ParkinsonEstimator',
     'RogersSatchellEstimator',
     'YangZhangEstimator',
-    'NeuralGARCHEstimator',
     'get_estimator',
     'list_estimators',
     'register_estimator',
-    'is_neural_garch_available',
     'ESTIMATORS',
 ]

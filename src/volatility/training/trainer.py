@@ -13,7 +13,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.training.metrics import (
+from src.volatility.training.metrics import (
     calculate_regression_metrics,
     calculate_classification_metrics,
     print_metrics_report,
@@ -113,7 +113,7 @@ class VolatilityTrainer:
             device: Device for training
             checkpoint_dir: Directory for saving checkpoints
         """
-        from src.models.base_model import get_device
+        from src.volatility.models.base_model import get_device
         
         torch = _get_torch()
         
@@ -330,7 +330,7 @@ class VolatilityTrainer:
 def train_volatility_model(
     df: pd.DataFrame,
     model_type: str = 'itransformer',
-    seq_length: int = 60,
+    seq_length: int = 252,
     prediction_horizons: List[int] = None,
     d_model: int = 128,
     nhead: int = 8,
@@ -367,8 +367,8 @@ def train_volatility_model(
     """
     torch = _get_torch()
     
-    from src.training.data_module import VolatilityDataModule
-    from src.models.volatility_predictor import VolatilityPredictorWrapper
+    from src.volatility.training.data_module import VolatilityDataModule
+    from src.volatility.models.volatility_predictor import VolatilityPredictorWrapper
     
     if prediction_horizons is None:
         prediction_horizons = [1, 5, 10, 20]
@@ -427,135 +427,6 @@ def train_volatility_model(
     return predictor, history, test_metrics
 
 
-def train_fed_rate_model(
-    df: pd.DataFrame,
-    model_type: str = 'lstm',
-    hidden_dim: int = 64,
-    num_layers: int = 2,
-    dropout: float = 0.2,
-    batch_size: int = 32,
-    epochs: int = 100,
-    lr: float = 0.001,
-    device: str = 'auto',
-    verbose: bool = True,
-) -> Tuple:
-    """
-    Train Fed rate prediction model.
-    
-    Args:
-        df: DataFrame with features
-        model_type: 'lstm' or 'transformer'
-        hidden_dim: Hidden dimension
-        num_layers: Number of layers
-        dropout: Dropout rate
-        batch_size: Batch size
-        epochs: Number of epochs
-        lr: Learning rate
-        device: Device preference
-        verbose: Print progress
-        
-    Returns:
-        Tuple of (trained model, history, metrics)
-    """
-    torch = _get_torch()
-    
-    from src.models.fed_rate_predictor import FedRatePredictorWrapper
-    
-    # Prepare data
-    feature_cols = [c for c in df.columns if c not in ['date', 'direction', 'rate_change']]
-    features = df[feature_cols].values
-    targets = df['direction'].values if 'direction' in df.columns else np.zeros(len(df))
-    
-    n_features = features.shape[1]
-    
-    # Create model
-    predictor = FedRatePredictorWrapper(
-        n_features=n_features,
-        model_type=model_type,
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
-        dropout=dropout,
-        device=device,
-    )
-    
-    # Training loop
-    optimizer = torch.optim.Adam(predictor.model.parameters(), lr=lr)
-    class_weights = torch.tensor([1.0, 1.0, 1.0], device=predictor.device)
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
-    
-    history = {'train_loss': []}
-    
-    predictor.model.train()
-    
-    for epoch in range(epochs):
-        # Simple batch training
-        epoch_loss = 0.0
-        n_batches = 0
-        
-        for i in range(0, len(features) - 60, batch_size):
-            batch_end = min(i + batch_size, len(features) - 60)
-            
-            X_batch = []
-            y_batch = []
-            
-            for j in range(i, batch_end):
-                if j + 60 < len(features):
-                    X_batch.append(features[j:j+60])
-                    y_batch.append(targets[j + 60])
-            
-            if len(X_batch) == 0:
-                continue
-            
-            X = torch.tensor(np.array(X_batch), dtype=torch.float32, device=predictor.device)
-            y = torch.tensor(np.array(y_batch), dtype=torch.long, device=predictor.device)
-            
-            optimizer.zero_grad()
-            
-            outputs = predictor.model(X)
-            loss = criterion(outputs['class_logits'], y)
-            
-            loss.backward()
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-            n_batches += 1
-        
-        avg_loss = epoch_loss / max(n_batches, 1)
-        history['train_loss'].append(avg_loss)
-        
-        if verbose and (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.6f}")
-    
-    # Evaluate
-    predictor.model.eval()
-    
-    # Get predictions for evaluation
-    all_preds = []
-    all_true = []
-    
-    with torch.no_grad():
-        for i in range(len(features) - 60):
-            X = features[i:i+60]
-            y = targets[i + 60] if i + 60 < len(targets) else 0
-            
-            X_tensor = torch.tensor(X[np.newaxis], dtype=torch.float32, device=predictor.device)
-            pred = predictor.predict(X_tensor.cpu().numpy())
-            
-            all_preds.append(pred['predicted_class'][0])
-            all_true.append(int(y))
-    
-    metrics = calculate_classification_metrics(
-        np.array(all_true),
-        np.array(all_preds),
-        class_labels=['Decrease', 'No Change', 'Increase']
-    )
-    
-    if verbose:
-        print_metrics_report(metrics, 'Fed Rate Prediction Metrics')
-    
-    return predictor, history, metrics
-
-
 def train_neural_garch(
     returns: np.ndarray,
     p: int = 1,
@@ -582,7 +453,7 @@ def train_neural_garch(
     Returns:
         Tuple of (trained model, history)
     """
-    from src.models.neural_garch import NeuralGARCHWrapper
+    from src.volatility.models.neural_garch import NeuralGARCHWrapper
     
     # Create and train model
     model = NeuralGARCHWrapper(

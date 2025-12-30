@@ -81,7 +81,7 @@ def qlike_loss(pred_log_variance, target_log_realized_variance):
     return loss
 
 
-def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda'):
+def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda', use_amp=False):
     """
     Training loop with quantile loss.
     
@@ -95,11 +95,17 @@ def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda'):
         epochs: Number of training epochs
         lr: Learning rate
         device: Device for training
+        use_amp: Use automatic mixed precision (FP16) for faster training on A100
         
     Returns:
         Trained model
     """
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    
+    # Setup mixed precision training if enabled
+    scaler = None
+    if use_amp and device.type == 'cuda':
+        scaler = torch.cuda.amp.GradScaler()
     
     for epoch in range(epochs):
         # Training
@@ -122,9 +128,13 @@ def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda'):
             
             optimizer.zero_grad()
             
-            # Forward: get all quantiles
+            # Forward: get all quantiles with mixed precision if enabled
             # Input_seq should be (batch, seq_len) from the dataset
-            quantiles = model(input_seq)  # (batch, 3): [q10, q50, q90]
+            if scaler is not None:
+                with torch.cuda.amp.autocast():
+                    quantiles = model(input_seq)  # (batch, 3): [q10, q50, q90]
+            else:
+                quantiles = model(input_seq)  # (batch, 3): [q10, q50, q90]
             
             # Check for NaN in model output
             if torch.isnan(quantiles).any() or torch.isinf(quantiles).any():
@@ -138,12 +148,19 @@ def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda'):
                 print(f"Warning: NaN/inf loss, skipping batch")
                 continue
             
-            loss.backward()
-            
-            # Gradient clipping to prevent explosion
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()
+            # Backward pass with mixed precision if enabled
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                # Gradient clipping to prevent explosion
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                # Gradient clipping to prevent explosion
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
             
             train_loss += loss.item()
             
@@ -172,7 +189,12 @@ def train(model, train_loader, val_loader, epochs=50, lr=1e-4, device='cuda'):
                 if torch.isnan(y).any() or torch.isinf(y).any():
                     continue
                 
-                quantiles = model(input_seq)
+                # Use mixed precision for validation if enabled
+                if scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        quantiles = model(input_seq)
+                else:
+                    quantiles = model(input_seq)
                 
                 # Check for NaN in model output
                 if torch.isnan(quantiles).any() or torch.isinf(quantiles).any():

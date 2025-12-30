@@ -24,7 +24,7 @@ from src.analysis import (
 from src.analysis.statistics import calculate_mse_matrix
 from src.data import get_market_data, check_data_quality
 from src.estimators import get_estimator, list_estimators
-from src.prediction import (
+from src.volatility.prediction import (
     build_pattern_database,
     find_similar_events,
     predict_volatility_path,
@@ -209,7 +209,8 @@ def main():
             prediction_result = predict_volatility_chronos(
                 df=df,
                 prediction_window=args.prediction_window,
-                device='auto'
+                device='auto',
+                symbol=args.symbol
             )
             
             if 'error' in prediction_result:

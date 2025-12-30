@@ -12,13 +12,113 @@ import numpy as np
 import torch
 import pandas as pd
 from torch.utils.data import DataLoader, ConcatDataset, Subset
+import subprocess
+import socket
 
-from src.models.chronos import ChronosVolatility
-from src.training.data import prepare_raw_signal, compute_target, VolatilityDataset
-from src.training.finetune import train
-from src.models.base_model import get_device
+from src.volatility.models.chronos import ChronosVolatility
+from src.volatility.training.data import prepare_raw_signal, compute_target, VolatilityDataset, create_weighted_sampler_for_concat_dataset
+from src.volatility.training.finetune import train
+from src.volatility.models.base_model import get_device
 from src.data.data_loader import get_market_data
 from datetime import datetime, timedelta
+
+
+def is_lambda_instance():
+    """Check if running on a Lambda Labs instance."""
+    # Check hostname for Lambda patterns
+    try:
+        hostname = socket.gethostname()
+        if 'lambda' in hostname.lower() or 'lambdalabs' in hostname.lower():
+            return True
+    except:
+        pass
+    
+    # Check if lambdacloud CLI is available
+    try:
+        result = subprocess.run(['which', 'lambdacloud'], 
+                               capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return True
+    except:
+        pass
+    
+    return False
+
+
+def get_lambda_instance_id():
+    """Get Lambda Labs instance ID from metadata or environment."""
+    # Try environment variable first
+    instance_id = os.environ.get('LAMBDA_INSTANCE_ID')
+    if instance_id:
+        return instance_id
+    
+    # Try to get from Lambda CLI
+    try:
+        result = subprocess.run(['lambdacloud', 'instance', 'list', '--format', 'json'],
+                               capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            import json
+            instances = json.loads(result.stdout)
+            # Get the first running instance
+            for instance in instances:
+                if instance.get('status') == 'running':
+                    return instance.get('id')
+    except:
+        pass
+    
+    # Try to get from instance metadata (if available)
+    try:
+        import urllib.request
+        metadata_url = 'http://169.254.169.254/latest/meta-data/instance-id'
+        with urllib.request.urlopen(metadata_url, timeout=2) as response:
+            return response.read().decode('utf-8')
+    except:
+        pass
+    
+    return None
+
+
+def terminate_lambda_instance(instance_id=None):
+    """Terminate Lambda Labs instance after training completes."""
+    # Check if auto-termination is disabled
+    if os.environ.get('LAMBDA_NO_AUTO_TERMINATE', '').lower() in ('1', 'true', 'yes'):
+        print("\n⚠ Auto-termination disabled (LAMBDA_NO_AUTO_TERMINATE is set)")
+        print("  Instance will remain running. Terminate manually when done.")
+        return False
+    
+    if not is_lambda_instance():
+        return False
+    
+    if instance_id is None:
+        instance_id = get_lambda_instance_id()
+    
+    if not instance_id:
+        print("\n⚠ Warning: Could not determine Lambda instance ID. Please terminate manually.")
+        print("  Run: lambdacloud instance terminate <instance-id>")
+        return False
+    
+    print(f"\n{'='*60}")
+    print("Training complete. Terminating Lambda Labs instance...")
+    print(f"{'='*60}")
+    
+    try:
+        result = subprocess.run(['lambdacloud', 'instance', 'terminate', instance_id],
+                               capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            print(f"✓ Successfully terminated instance: {instance_id}")
+            print("  Instance will shut down shortly. You may be disconnected.")
+            return True
+        else:
+            print(f"✗ Failed to terminate instance: {result.stderr}")
+            print(f"  Please terminate manually: lambdacloud instance terminate {instance_id}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("⚠ Timeout while terminating instance. Please terminate manually.")
+        return False
+    except Exception as e:
+        print(f"✗ Error terminating instance: {e}")
+        print(f"  Please terminate manually: lambdacloud instance terminate {instance_id}")
+        return False
 
 
 def get_sp500_tickers():
@@ -134,8 +234,8 @@ def process_ticker_to_dataset(df, ticker):
     raw_signal = raw_signal.loc[common_idx]
     target = target.loc[common_idx]
     
-    # Create dataset
-    dataset = VolatilityDataset(raw_signal, target, seq_length=60, horizon=20)
+    # Create dataset (using 252 days = 1 year with recent weighting)
+    dataset = VolatilityDataset(raw_signal, target, seq_length=252, horizon=20, use_recent_weighting=True)
     return dataset
 
 
@@ -220,6 +320,10 @@ def main():
     train_data = Subset(combined_dataset, train_indices.tolist())
     val_data = Subset(combined_dataset, val_indices.tolist())
     
+    # Use weighted sampler for training to favor recent data
+    # Note: WeightedRandomSampler requires replacement=True, so we can't use it with Subset
+    # Instead, we'll use regular shuffle but the individual datasets already weight recent samples
+    # For a proper weighted sampler with ConcatDataset, we'd need to restructure the code
     train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
     
@@ -256,6 +360,11 @@ def main():
     
     print(f"\n✓ Loaded {len(test_datasets)} test tickers for evaluation")
     # TODO: Run evaluation on test datasets
+    
+    # Auto-terminate Lambda instance if running on Lambda Labs
+    if is_lambda_instance():
+        instance_id = get_lambda_instance_id()
+        terminate_lambda_instance(instance_id)
 
 
 if __name__ == '__main__':

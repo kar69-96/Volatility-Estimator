@@ -12,13 +12,127 @@ import numpy as np
 import torch
 import pandas as pd
 from torch.utils.data import DataLoader, ConcatDataset, Subset
+import subprocess
+import socket
 
-from src.models.chronos import ChronosVolatility
-from src.training.data import prepare_raw_signal, compute_target, VolatilityDataset
-from src.training.finetune import train
-from src.models.base_model import get_device
+from src.volatility.models.chronos import ChronosVolatility
+from src.volatility.training.data import prepare_raw_signal, compute_target, VolatilityDataset, create_weighted_sampler_for_concat_dataset
+from src.volatility.training.finetune import train
+from src.volatility.models.base_model import get_device
 from src.data.data_loader import get_market_data
 from datetime import datetime, timedelta
+
+
+def is_lambda_instance():
+    """Check if running on a Lambda Labs instance."""
+    # Check hostname for Lambda patterns
+    try:
+        hostname = socket.gethostname()
+        if 'lambda' in hostname.lower() or 'lambdalabs' in hostname.lower():
+            return True
+    except:
+        pass
+    
+    # Check if we're on a cloud instance (common patterns)
+    try:
+        # Lambda Labs instances often have specific hostname patterns
+        hostname = socket.gethostname()
+        # Check for common cloud instance patterns
+        if any(pattern in hostname.lower() for pattern in ['ip-', 'ec2-', 'instance']):
+            # Additional check: try to access Lambda Labs metadata or API
+            pass
+    except:
+        pass
+    
+    # Check environment variable (can be set manually)
+    if os.environ.get('LAMBDA_INSTANCE_ID'):
+        return True
+    
+    return False
+
+
+def get_lambda_instance_id():
+    """Get Lambda Labs instance ID from metadata or environment."""
+    # Try environment variable first (most reliable)
+    instance_id = os.environ.get('LAMBDA_INSTANCE_ID')
+    if instance_id:
+        return instance_id
+    
+    # Try to get from instance metadata (AWS-style metadata endpoint)
+    try:
+        import urllib.request
+        # Lambda Labs may use similar metadata service
+        metadata_url = 'http://169.254.169.254/latest/meta-data/instance-id'
+        with urllib.request.urlopen(metadata_url, timeout=2) as response:
+            return response.read().decode('utf-8')
+    except:
+        pass
+    
+    # Try to get from hostname
+    try:
+        hostname = socket.gethostname()
+        # Extract instance ID from hostname if it follows a pattern
+        # This is a fallback - may not work for all providers
+        if 'ip-' in hostname.lower():
+            # AWS-style: ip-10-0-0-1 -> could extract
+            pass
+    except:
+        pass
+    
+    return None
+
+
+def terminate_lambda_instance(instance_id=None):
+    """Terminate Lambda Labs instance after training completes."""
+    # Check if auto-termination is disabled
+    if os.environ.get('LAMBDA_NO_AUTO_TERMINATE', '').lower() in ('1', 'true', 'yes'):
+        print("\n⚠ Auto-termination disabled (LAMBDA_NO_AUTO_TERMINATE is set)")
+        print("  Instance will remain running. Terminate manually when done.")
+        return False
+    
+    if not is_lambda_instance():
+        return False
+    
+    if instance_id is None:
+        instance_id = get_lambda_instance_id()
+    
+    if not instance_id:
+        print("\n⚠ Warning: Could not determine Lambda instance ID.")
+        print("  To enable auto-termination, set LAMBDA_INSTANCE_ID environment variable:")
+        print("  export LAMBDA_INSTANCE_ID='your-instance-id'")
+        print("  Or terminate manually from the Lambda Labs web dashboard.")
+        return False
+    
+    print(f"\n{'='*60}")
+    print("Training complete. Attempting to terminate Lambda Labs instance...")
+    print(f"{'='*60}")
+    
+    # Try using shutdown command (works on most cloud instances)
+    try:
+        print(f"Attempting to shutdown instance {instance_id}...")
+        # Use sudo shutdown -h now to stop the instance
+        result = subprocess.run(['sudo', 'shutdown', '-h', 'now'],
+                               timeout=5, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"✓ Shutdown command sent. Instance will terminate shortly.")
+            return True
+    except subprocess.TimeoutExpired:
+        pass
+    except PermissionError:
+        print("⚠ Permission denied for shutdown. Trying alternative method...")
+    except Exception as e:
+        print(f"⚠ Shutdown command failed: {e}")
+    
+    # Alternative: Try to use API if available
+    # Note: Lambda Labs uses web dashboard, so we can't use CLI
+    # The best we can do is shutdown the instance from within
+    print(f"\n⚠ Could not automatically terminate instance.")
+    print(f"  Instance ID: {instance_id}")
+    print(f"  Please terminate manually from Lambda Labs web dashboard:")
+    print(f"  https://lambdalabs.com/")
+    print(f"\n  Or run: sudo shutdown -h now")
+    
+    return False
 
 
 def load_and_prepare_ticker_data(ticker, data_dir, start_date, end_date):
@@ -71,8 +185,8 @@ def load_and_prepare_ticker_data(ticker, data_dir, start_date, end_date):
     raw_signal = raw_signal.loc[common_idx]
     target = target.loc[common_idx]
     
-    # Create dataset
-    dataset = VolatilityDataset(raw_signal, target, seq_length=60, horizon=20)
+    # Create dataset (using 252 days = 1 year with recent weighting)
+    dataset = VolatilityDataset(raw_signal, target, seq_length=252, horizon=20, use_recent_weighting=True)
     return dataset
 
 
@@ -150,6 +264,16 @@ def main():
         # TODO: Run evaluation on test dataset
     else:
         print(f"✗ Failed to load test ticker {test_ticker}")
+    
+    # Auto-terminate Lambda instance if running on Lambda Labs
+    print(f"\n{'='*60}")
+    print("Checking for Lambda Labs instance auto-termination...")
+    print(f"{'='*60}")
+    if is_lambda_instance():
+        instance_id = get_lambda_instance_id()
+        terminate_lambda_instance(instance_id)
+    else:
+        print("Not running on Lambda Labs instance - skipping auto-termination")
 
 
 if __name__ == '__main__':

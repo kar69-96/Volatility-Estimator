@@ -694,7 +694,8 @@ def render_single_asset_forecasting():
                 result = predict_volatility_chronos(
                     df=df,
                     prediction_window=horizon if horizon else 20,
-                    device='auto'
+                    device='auto',
+                    symbol=symbol
                 )
                 if 'error' not in result:
                     st.session_state['forecast_result'] = result
