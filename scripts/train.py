@@ -23,9 +23,64 @@ from datetime import datetime, timedelta
 
 def main():
     """Main training function."""
-    # CRITICAL: Reserve one ticker for held-out validation
-    train_tickers = ['AAPL', 'MSFT', 'GOOG', 'SPY', 'TSLA']  # Train on these
-    held_out_ticker = 'NVDA'  # Test on this (unseen during training)
+    # Full list of training tickers (S&P 500 companies and related)
+    all_tickers_str = """A, AAPL, AAN, AAP, AAPL, AAXJ, ABBV, ABC, ABER, ABMD, ABT, ACGL, ACN,
+ADBE, ADBE, ADM, ADP, ADSK, AEE, AFL, AGCO, AGI, AIG, AIZ, AJG, AKAM,
+ALB, ALE, ALGN, ALK, ALL, ALLE, AMAT, AMCR, AMD, AME, AMGN, AMP, AMT,
+AMZN, ANET, ANSS, AON, AOS, APA, APD, APH, APTV, ARE, ARNC, ASML, ATVI,
+AVB, AVGO, AVY, AWK, AXP, AYI, AZO, BABA, BAC, BALL, BAM, BAX, BBWI,
+BDX, BEN, BIIB, BK, BLK, BLL, BMC, BMY, BR, BRK.B, BSX, BSWN, C, CAG,
+CAH, CARR, CAT, CB, CBOE, CBRE, CCI, CCK, CDNS, CE, CERN, CF, CFG, CHD,
+CHRW, CHTR, CI, CINF, CL, CLX, CMCSA, CME, CMG, CMI, CMS, CNC, CNP, COF,
+COST, COTY, CPB, CPRT, CRM, CSCO, CSX, CTAS, CTLT, CTRA, CTSH, CTVA, D,
+DAL, DD, DHI, DHR, DIS, DISCA, DISCK, DLR, DLTR, DOV, DOW, DPZ, DRE,
+DRI, DTE, DUOL, DVN, DXC, EA, EBAY, ECL, ED, EFT, EIX, EL, EMN, EMR, ENPH,
+EOG, EQIX, EQR, ES, ESS, ETN, ETR, ETSY, EVRG, EW, EXC, EXPD, EXPE, EXR,
+F, FANG, FAST, FBHS, FCX, FDX, FE, FFIV, FIS, FISV, FITB, FL, FLIR, FLS,
+FMC, FOX, FOXA, FRC, FSLR, FTV, GD, GE, GILD, GIS, GL, GLW, GM, GOOG,
+GOOGL, GPC, GPN, GPP, GPS, GRMN, GS, GWW, HAL, HAS, HBAN, HBI, HCA, HD,
+HES, HFC, HIG, HII, HLT, HOLX, HON, HP, HPQ, HRL, HSY, HUM, IBM, ICE,
+IFF, ILMN, INCY, INTC, INTU, IP, IPG, IPGP, IQV, IR, IRM, ISRG, IT, ITW,
+IVZ, J, JBHT, JCI, JEF, JKHY, JNJ, JNPR, JPM, JWN, K, KEY, KEYS, KHC,
+KIM, KLAC, KMB, KMI, KO, KR, KSS, L, LB, LEG, LHX, LIN, LKQ, LLY, LMT,
+LNC, LNT, LRCX, LSTR, LULU, LVS, LW, LYB, M, MA, MAN, MAR, MAS, MCD,
+MCHP, MCK, MCO, MDLZ, MDT, MET, MGM, MHK, MKC, MKTX, MLCO, MMC, MMM,
+MNST, MO, MOS, MPC, MRK, MRO, MS, MSCI, MSFT, MSI, MTB, MTD, MU, MXIM,
+MYL, NCLH, NEE, NEM, NFLX, NI, NKE, NLOK, NOC, NOV, NOW, NRG, NSC, NTAP,
+NTRS, NUE, NVDA, NVR, NWL, NWS, NWSA, NXPI, O, ODFL, OGE, OHI, OLN, OMC,
+ORCL, ORLY, OXY, PAYX, PBCT, PCAR, PCG, PEP, PFE, PFG, PG, PGR, PH, PKG,
+PKI, PLD, PLTR, PMI, PNC, PNR, PPG, PPE, PPL, PRGO, PRU, PSA, PSX, PVH,
+PXD, PYPL, QCOM, QRVO, RCL, RE, REG, REGN, RF, RHI, RJF, RL, RMD, ROK,
+ROP, ROST, RSG, RTX, RUN, SBUX, SCHW, SEE, SEL, SJM, SLB, SNAP, SON, SPG,
+SPGI, SRE, STE, STT, STZ, SWK, SWKS, SYK, SYY, T, TAP, TDG, TEL, TER,
+TFC, TFSL, TGT, TJX, TMO, TMUS, TPR, TRMB, TROX, TRV, TSCO, TSLA, TT,
+TVC, TYL, UAL, UDR, UHS, UIL, ULTA, UNH, UNM, UNP, UPS, URI, USB, V,
+VFC, VLO, VMC, VRSK, VRSN, VRT, VTR, VTRS, VZ, WAB, WAT, WBD, WEC, WELL,
+WFC, WHR, WM, WMB, WMT, WRB, WRK, WST, WY, XEL, XLNX, XOM, XRAY, XRX,
+XYL, YUM, ZBRA, ZBH, ZION, ZTS"""
+    
+    # Parse ticker list and remove duplicates
+    all_tickers = [t.strip() for t in all_tickers_str.replace('\n', ',').split(',')]
+    all_tickers = [t for t in all_tickers if t]  # Remove empty strings
+    all_tickers = list(dict.fromkeys(all_tickers))  # Remove duplicates while preserving order
+    
+    print(f"Total tickers in dataset: {len(all_tickers)}")
+    
+    # Split into train/val/test sets (80/10/10)
+    np.random.seed(42)
+    np.random.shuffle(all_tickers)
+    
+    train_size = int(0.8 * len(all_tickers))
+    val_size = int(0.1 * len(all_tickers))
+    
+    train_tickers = all_tickers[:train_size]
+    val_tickers = all_tickers[train_size:train_size + val_size]
+    held_out_tickers = all_tickers[train_size + val_size:]
+    
+    print(f"\nDataset split:")
+    print(f"  Training tickers: {len(train_tickers)}")
+    print(f"  Validation tickers: {len(val_tickers)}")
+    print(f"  Held-out test tickers: {len(held_out_tickers)}")
     
     # Data directory
     data_dir = Path('data/cache')
@@ -37,12 +92,13 @@ def main():
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=365 * 10)).strftime('%Y-%m-%d')
     
-    for ticker in train_tickers:
+    print(f"\nLoading/preparing training data for {len(train_tickers)} tickers...")
+    for i, ticker in enumerate(train_tickers, 1):
         data_path = data_dir / f'{ticker}.parquet'
         
         # If cache file doesn't exist, download data
         if not data_path.exists():
-            print(f"Cache file not found for {ticker}, downloading data...")
+            print(f"[{i}/{len(train_tickers)}] Downloading {ticker}...", end=' ')
             try:
                 df = get_market_data(
                     symbol=ticker,
@@ -52,9 +108,9 @@ def main():
                     cache_dir=str(data_dir),
                     cache_format='parquet'
                 )
-                print(f"Downloaded {ticker}: {len(df)} rows")
+                print(f"✓ {len(df)} rows")
             except Exception as e:
-                print(f"Error downloading {ticker}: {e}, skipping...")
+                print(f"✗ Error: {e}")
                 continue
         else:
             # Load from cache
@@ -92,7 +148,8 @@ def main():
         dataset = VolatilityDataset(raw_signal, target, seq_length=60, horizon=20)
         if len(dataset) > 0:
             train_datasets.append(dataset)
-            print(f"Loaded {ticker}: {len(dataset)} samples")
+            if i % 10 == 0 or i == len(train_tickers):
+                print(f"  Processed {i}/{len(train_tickers)} tickers, {len(train_datasets)} successful, {sum(len(d) for d in train_datasets)} total samples")
     
     if not train_datasets:
         print("Error: No training datasets loaded!")
@@ -100,7 +157,8 @@ def main():
     
     # Combine all training tickers
     combined_dataset = ConcatDataset(train_datasets)
-    print(f"Total training samples: {len(combined_dataset)}")
+    print(f"\n✓ Successfully loaded {len(train_datasets)}/{len(train_tickers)} training tickers")
+    print(f"✓ Total training samples: {len(combined_dataset):,}")
     
     # Temporal split (time series aware)
     # For time series, we should split by time, not randomly
@@ -136,29 +194,35 @@ def main():
     torch.save(model.state_dict(), checkpoint_path)
     print(f"\nTraining complete. Model saved to {checkpoint_path}")
     
-    # Test on held-out ticker
-    print(f"\nTesting on held-out ticker: {held_out_ticker}")
-    test_path = data_dir / f'{held_out_ticker}.parquet'
-    if test_path.exists():
-        test_df = pd.read_parquet(test_path)
-        # TODO: Run evaluation on held-out ticker
-        print(f"Test data loaded for {held_out_ticker}")
-    else:
-        print(f"Cache file not found for {held_out_ticker}, downloading data...")
-        try:
-            test_df = get_market_data(
-                symbol=held_out_ticker,
-                start_date=start_date,
-                end_date=end_date,
-                use_cache=True,
-                cache_dir=str(data_dir),
-                cache_format='parquet'
-            )
-            print(f"Downloaded {held_out_ticker}: {len(test_df)} rows")
-            # TODO: Run evaluation on held-out ticker
-            print(f"Test data loaded for {held_out_ticker}")
-        except Exception as e:
-            print(f"Warning: Failed to download {held_out_ticker}: {e}, skipping held-out test")
+    # Test on held-out tickers
+    print(f"\nPreparing {len(held_out_tickers)} held-out test tickers...")
+    held_out_loaded = []
+    for i, ticker in enumerate(held_out_tickers, 1):
+        test_path = data_dir / f'{ticker}.parquet'
+        if test_path.exists():
+            try:
+                test_df = pd.read_parquet(test_path)
+                held_out_loaded.append(ticker)
+            except Exception:
+                pass
+        else:
+            print(f"[{i}/{len(held_out_tickers)}] Downloading held-out ticker {ticker}...", end=' ')
+            try:
+                test_df = get_market_data(
+                    symbol=ticker,
+                    start_date=start_date,
+                    end_date=end_date,
+                    use_cache=True,
+                    cache_dir=str(data_dir),
+                    cache_format='parquet'
+                )
+                held_out_loaded.append(ticker)
+                print(f"✓ {len(test_df)} rows")
+            except Exception as e:
+                print(f"✗ Error: {e}")
+    
+    print(f"Loaded {len(held_out_loaded)} held-out test tickers for evaluation")
+    # TODO: Run evaluation on held-out tickers
 
 
 if __name__ == '__main__':
