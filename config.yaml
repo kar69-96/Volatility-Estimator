@@ -11,6 +11,13 @@ data:
   end_date: 2024-12-31
   retry_attempts: 3
   rate_limit_delay: 1.0  # seconds between API requests
+  
+  # Chronos training data
+  tickers: [AAPL, MSFT, GOOG, SPY, TSLA, NVDA]  # Tickers for training and testing
+  train_start: 2010-01-01
+  train_end: 2020-01-01
+  val_end: 2022-01-01
+  test_end: 2024-01-01
 
 # Volatility Estimation Configuration
 volatility:
@@ -68,25 +75,12 @@ deep_learning:
   checkpoint_dir: ./models/checkpoints
   save_best_only: true
 
-# Volatility Predictor (iTransformer)
-volatility_predictor:
-  model_type: itransformer  # itransformer or transformer
-  d_model: 128              # Model dimension
-  nhead: 8                  # Number of attention heads
-  num_layers: 4             # Number of transformer layers
-  d_ff: 256                 # Feed-forward dimension
-  dropout: 0.1
+# Chronos Volatility Predictor
+chronos:
+  model_id: amazon/chronos-t5-mini
+  use_lora: true            # Use LoRA adapters for efficient fine-tuning
   seq_length: 60            # Input sequence length (trading days)
-  prediction_horizons:      # Days ahead to predict
-    - 1
-    - 5
-    - 10
-    - 20
-  
-  # Training settings
-  learning_rate: 0.001
-  epochs: 100
-  early_stopping_patience: 10
+  prediction_horizon: 20    # Days ahead to predict
 
 # Fed Rate Predictor (LSTM/Transformer)
 fed_rate_predictor:
@@ -99,20 +93,6 @@ fed_rate_predictor:
   
   # Classification settings
   n_classes: 3              # Increase, Decrease, No Change
-  
-  # Training settings
-  learning_rate: 0.001
-  epochs: 100
-
-# Neural GARCH Configuration
-neural_garch:
-  p: 1                      # ARCH order (lagged squared returns)
-  q: 1                      # GARCH order (lagged variances)
-  hidden_layers:            # MLP hidden layer sizes
-    - 32
-    - 16
-  activation: relu          # relu, gelu, or tanh
-  use_skip_connection: true # Add linear GARCH component
   
   # Training settings
   learning_rate: 0.001
@@ -138,10 +118,12 @@ features:
 
 # Training Configuration
 training:
-  train_ratio: 0.7          # Fraction of data for training
-  val_ratio: 0.15           # Fraction for validation
-  test_ratio: 0.15          # Fraction for testing (implicit)
-  shuffle: false            # Don't shuffle time series data
+  epochs: 50                # Number of training epochs
+  batch_size: 32            # Batch size for training
+  learning_rate: 1e-4       # Learning rate
+  train_ratio: 0.8          # Fraction of data for training
+  val_ratio: 0.2            # Fraction for validation
+  shuffle: true             # Shuffle training data (cross-ticker training)
   
   # Early stopping
   early_stopping:

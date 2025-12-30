@@ -21,8 +21,13 @@ torch>=2.0.0           # PyTorch deep learning framework
 # Note: For GPU support, install with CUDA:
 # pip install torch --index-url https://download.pytorch.org/whl/cu118
 
+# Transformers and Chronos
+transformers>=4.35.0   # Hugging Face transformers (for Chronos)
+peft>=0.6.0            # Parameter-Efficient Fine-Tuning (LoRA)
+
 # Feature Engineering
 scikit-learn>=1.3.0    # Feature scaling and preprocessing
+arch>=6.2.0            # GARCH baseline implementation
 # pandas-ta>=0.3.14b0  # Optional: Additional technical indicators
 
 # Optional: PyTorch Forecasting (for Temporal Fusion Transformer)
