@@ -1,42 +1,57 @@
+# ============================================================================
+# IMPORTANT: PyTorch Installation Instructions for Lambda Labs
+# ============================================================================
+# PyTorch, torchvision, and torchaudio MUST be installed from PyTorch index
+# to ensure matching CUDA versions. Lambda Labs typically uses CUDA 11.8.
+#
+# Install PyTorch packages FIRST with:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+# Then install remaining requirements:
+#   pip install -r requirements.txt
+#
+# If CUDA 12.1 is available:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# ============================================================================
+
 # Core Dependencies
-pandas>=2.0.0          # Data manipulation
-numpy>=1.24.0          # Numerical computing
-yfinance>=0.2.0        # Market data API
-matplotlib>=3.7.0      # Visualization
-xlsxwriter>=3.1.0      # Excel export
-pyyaml>=6.0            # Config file parsing
-pytest>=7.4.0          # Testing framework
-pytest-cov>=4.1.0      # Test coverage
-requests>=2.31.0       # HTTP requests
-html5lib>=1.1          # HTML parsing for pandas.read_html (S&P 500 list fetching)
-lxml>=4.9.0            # Alternative HTML/XML parser (faster than html5lib)
-fredapi>=0.5.0         # FRED API access (optional)
-pyarrow>=12.0.0        # Parquet support
-tqdm>=4.65.0           # Progress bars
-python-dotenv>=1.0.0   # Environment variable management
-scipy>=1.10.0          # Statistical functions (t-test)
-streamlit>=1.28.0      # Web interface
-plotly>=5.17.0         # Interactive charts
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.0
+matplotlib>=3.7.0
+xlsxwriter>=3.1.0
+pyyaml>=6.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
+requests>=2.31.0
+html5lib>=1.1
+lxml>=4.9.0
+fredapi>=0.5.0
+pyarrow>=12.0.0
+tqdm>=4.65.0
+python-dotenv>=1.0.0
+scipy>=1.10.0
+streamlit>=1.28.0
+plotly>=5.17.0
 
-# Deep Learning Dependencies (PyTorch)
-torch>=2.0.0           # PyTorch deep learning framework
-torchaudio>=2.0.0      # PyTorch audio processing (must match torch version)
-torchvision>=0.15.0    # PyTorch vision (must match torch CUDA version)
-# Note: For GPU support with matching versions, install all from PyTorch index:
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# or for CUDA 12.1:
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# PyTorch Dependencies
+# NOTE: These should be installed from PyTorch index (see instructions above)
+# Leaving them commented here to avoid version conflicts
+# torch>=2.0.0
+# torchvision>=0.15.0
+# torchaudio>=2.0.0
 
-# Transformers and Chronos
-transformers>=4.40.0   # Hugging Face transformers (for Chronos - requires T5 support)
-peft>=0.6.0            # Parameter-Efficient Fine-Tuning (LoRA)
-sentencepiece>=0.1.99  # Required for T5 tokenization
-Pillow>=9.0.0          # Required for newer transformers (provides Image.Resampling)
+# Transformers and Chronos (requires T5 support)
+transformers>=4.40.0
+peft>=0.6.0
+sentencepiece>=0.1.99
+
+# Image Processing (required for transformers 4.40+)
+Pillow>=9.0.0
 
 # Feature Engineering
-scikit-learn>=1.3.0    # Feature scaling and preprocessing
-arch>=6.2.0            # GARCH baseline implementation
-# pandas-ta>=0.3.14b0  # Optional: Additional technical indicators
+scikit-learn>=1.3.0
+arch>=6.2.0
 
 # Optional: PyTorch Forecasting (for Temporal Fusion Transformer)
 # pytorch-forecasting>=1.0.0
