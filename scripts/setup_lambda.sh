@@ -92,9 +92,29 @@ echo ""
 echo "Step 7: Installing remaining requirements..."
 pip install --no-cache-dir -r requirements.txt
 
+# Install Lambda Labs CLI for auto-termination
+echo ""
+echo "Step 7.5: Installing Lambda Labs CLI (for auto-termination)..."
+echo "  Installing lambdacloud (official Lambda Labs CLI)..."
+pip install --no-cache-dir lambdacloud || echo "  ⚠ Failed to install lambdacloud"
+echo "  Installing lambda-cli (alternative CLI)..."
+pip install --no-cache-dir lambda-cli || echo "  ⚠ Failed to install lambda-cli"
+
+if command -v lambdacloud &> /dev/null; then
+    echo "  ✓ lambdacloud installed successfully"
+    echo "  Note: Authenticate with: lambdacloud auth login"
+    echo "        Or set LAMBDA_API_KEY environment variable"
+elif command -v lambda &> /dev/null; then
+    echo "  ✓ lambda CLI installed successfully"
+    echo "  Note: Authenticate with: lambda auth"
+else
+    echo "  ⚠ Neither CLI found in PATH after installation"
+    echo "  You may need to activate the venv or add to PATH"
+fi
+
 # Verify critical dependencies
 echo ""
-echo "Step 8: Verifying critical dependencies..."
+echo "Step 8: Verifying critical dependencies and Lambda CLI..."
 python3 -c "
 print('  Checking Pillow...')
 import PIL
@@ -118,6 +138,15 @@ print('  Checking PEFT...')
 from peft import LoraConfig, get_peft_model
 print('  ✓ PEFT available')
 "
+
+# Verify Lambda CLI
+if command -v lambdacloud &> /dev/null; then
+    echo "  ✓ Lambda CLI (lambdacloud) available for auto-termination"
+elif command -v lambda &> /dev/null; then
+    echo "  ✓ Lambda CLI (lambda) available for auto-termination"
+else
+    echo "  ⚠ Lambda CLI not found in PATH (may need to activate venv)"
+fi
 
 echo ""
 echo "=========================================="

@@ -33,14 +33,21 @@ def is_lambda_instance():
     except:
         pass
     
-    # Check if we're on a cloud instance (common patterns)
+    # Check if lambdacloud CLI is available (official Lambda Labs CLI)
     try:
-        # Lambda Labs instances often have specific hostname patterns
-        hostname = socket.gethostname()
-        # Check for common cloud instance patterns
-        if any(pattern in hostname.lower() for pattern in ['ip-', 'ec2-', 'instance']):
-            # Additional check: try to access Lambda Labs metadata or API
-            pass
+        result = subprocess.run(['which', 'lambdacloud'], 
+                               capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return True
+    except:
+        pass
+    
+    # Check if lambda CLI is available (third-party lambda-cli)
+    try:
+        result = subprocess.run(['which', 'lambda'], 
+                               capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return True
     except:
         pass
     
@@ -58,24 +65,39 @@ def get_lambda_instance_id():
     if instance_id:
         return instance_id
     
-    # Try to get from instance metadata (AWS-style metadata endpoint)
+    # Try to get from lambdacloud CLI (official)
     try:
-        import urllib.request
-        # Lambda Labs may use similar metadata service
-        metadata_url = 'http://169.254.169.254/latest/meta-data/instance-id'
-        with urllib.request.urlopen(metadata_url, timeout=2) as response:
-            return response.read().decode('utf-8')
+        result = subprocess.run(['lambdacloud', 'instance', 'list', '--format', 'json'],
+                               capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            import json
+            instances = json.loads(result.stdout)
+            # Get the first running instance
+            for instance in instances:
+                if instance.get('status') == 'running':
+                    return instance.get('id')
     except:
         pass
     
-    # Try to get from hostname
+    # Try to get from lambda CLI (third-party lambda-cli)
     try:
-        hostname = socket.gethostname()
-        # Extract instance ID from hostname if it follows a pattern
-        # This is a fallback - may not work for all providers
-        if 'ip-' in hostname.lower():
-            # AWS-style: ip-10-0-0-1 -> could extract
-            pass
+        result = subprocess.run(['lambda', 'ls', '--json'],
+                               capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            import json
+            instances = json.loads(result.stdout)
+            # Get the first running instance
+            if isinstance(instances, list) and len(instances) > 0:
+                return instances[0].get('id') or instances[0].get('instance_id')
+    except:
+        pass
+    
+    # Try to get from instance metadata (if available)
+    try:
+        import urllib.request
+        metadata_url = 'http://169.254.169.254/latest/meta-data/instance-id'
+        with urllib.request.urlopen(metadata_url, timeout=2) as response:
+            return response.read().decode('utf-8')
     except:
         pass
     
@@ -97,40 +119,68 @@ def terminate_lambda_instance(instance_id=None):
         instance_id = get_lambda_instance_id()
     
     if not instance_id:
-        print("\n⚠ Warning: Could not determine Lambda instance ID.")
+        print("\n⚠ Warning: Could not determine Lambda instance ID. Please terminate manually.")
         print("  To enable auto-termination, set LAMBDA_INSTANCE_ID environment variable:")
         print("  export LAMBDA_INSTANCE_ID='your-instance-id'")
-        print("  Or terminate manually from the Lambda Labs web dashboard.")
+        print("  Or run: lambdacloud instance terminate <instance-id>")
+        print("         OR: lambda rm <instance-id>")
         return False
     
     print(f"\n{'='*60}")
-    print("Training complete. Attempting to terminate Lambda Labs instance...")
+    print("Training complete. Terminating Lambda Labs instance...")
     print(f"{'='*60}")
     
-    # Try using shutdown command (works on most cloud instances)
+    # Try lambdacloud CLI first (official Lambda Labs CLI)
     try:
-        print(f"Attempting to shutdown instance {instance_id}...")
-        # Use sudo shutdown -h now to stop the instance
-        result = subprocess.run(['sudo', 'shutdown', '-h', 'now'],
-                               timeout=5, capture_output=True, text=True)
+        print(f"Attempting to terminate instance {instance_id} via lambdacloud...")
+        result = subprocess.run(['lambdacloud', 'instance', 'terminate', instance_id],
+                               capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
-            print(f"✓ Shutdown command sent. Instance will terminate shortly.")
+            print(f"✓ Successfully terminated instance: {instance_id}")
+            print("  Instance will shut down shortly. You may be disconnected.")
             return True
+    except FileNotFoundError:
+        # Try lambda CLI (third-party lambda-cli) as fallback
+        try:
+            print(f"lambdacloud not found, trying lambda CLI...")
+            result = subprocess.run(['lambda', 'rm', instance_id],
+                                   capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                print(f"✓ Successfully terminated instance: {instance_id}")
+                print("  Instance will shut down shortly. You may be disconnected.")
+                return True
+            else:
+                print(f"✗ Failed to terminate with lambda CLI: {result.stderr}")
+        except FileNotFoundError:
+            print("⚠ Neither lambdacloud nor lambda CLI found.")
+            print("  Install one of:")
+            print("    pip install lambdacloud  # Official Lambda Labs CLI")
+            print("    pip install lambda-cli  # Third-party CLI")
+        except Exception as e:
+            print(f"✗ Error with lambda CLI: {e}")
     except subprocess.TimeoutExpired:
-        pass
-    except PermissionError:
-        print("⚠ Permission denied for shutdown. Trying alternative method...")
+        print("⚠ Timeout while terminating instance. Please terminate manually.")
     except Exception as e:
-        print(f"⚠ Shutdown command failed: {e}")
+        print(f"✗ Error terminating instance: {e}")
     
-    # Alternative: Try to use API if available
-    # Note: Lambda Labs uses web dashboard, so we can't use CLI
-    # The best we can do is shutdown the instance from within
+    # If both CLIs failed, provide manual instructions
     print(f"\n⚠ Could not automatically terminate instance.")
     print(f"  Instance ID: {instance_id}")
-    print(f"  Please terminate manually from Lambda Labs web dashboard:")
-    print(f"  https://lambdalabs.com/")
-    print(f"\n  Or run: sudo shutdown -h now")
+    print(f"  Please terminate manually:")
+    print(f"    lambdacloud instance terminate {instance_id}")
+    print(f"    OR: lambda rm {instance_id}")
+    print(f"    OR: https://lambdalabs.com/ (web dashboard)")
+    
+    # Fallback to shutdown command (last resort)
+    print("\n  Attempting fallback shutdown method...")
+    try:
+        subprocess.run(['sudo', 'shutdown', '-h', 'now'],
+                      timeout=5, capture_output=True, text=True)
+        print("  ✓ Shutdown command sent (may not fully terminate Lambda instance)")
+        print("  ⚠ WARNING: This only shuts down the OS. The instance may still be billing.")
+        print("  Please terminate from Lambda Labs dashboard to stop billing.")
+    except:
+        pass
     
     return False
 

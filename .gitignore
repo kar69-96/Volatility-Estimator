@@ -80,4 +80,5 @@ models/checkpoints/*.ckpt
 # Scripts backup files
 scripts/*.backup
 scripts/*.sh.bak
+scripts/export_to_huggingface.py
 

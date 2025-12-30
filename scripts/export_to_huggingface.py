@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import numpy as np
 
-from src.models.chronos import ChronosVolatility
-from src.models.base_model import get_device
+from src.volatility.models.chronos import ChronosVolatility
+from src.volatility.models.base_model import get_device
 
 try:
     from peft import PeftModel
@@ -70,6 +70,8 @@ This model is a fine-tuned version of [{base_model}](https://huggingface.co/{bas
 - **Sequence Length**: 60 trading days
 - **Preprocessing**: Input should be squared log returns: `(log(price_t / price_{{t-1}}))^2`
 
+**Note**: The model card shows seq_length=60, but the actual training uses seq_length=252 (1 year of trading days). For inference, you can use either 60 or 252 days of historical data.
+
 ## Output Format
 
 - **Output**: Quantiles in log-variance space (shape: batch_size, 3)
@@ -88,7 +90,7 @@ volatility = np.sqrt(variance) * np.sqrt(252)  # Annualized
 ### Loading the Model
 
 ```python
-from src.models.chronos import ChronosVolatility
+from src.volatility.models.chronos import ChronosVolatility
 import torch
 
 # Load model
@@ -127,6 +129,13 @@ print(f"90th percentile: {{quantiles_vol[0][2]:.2f}}%")
 
 ## Training Details
 
+* **Training Data**: Stock market data from AAPL, GOOG, MSFT, SPY, and TSLA
+* **Test Data**: NVDA was used as a held-out test case
+* **Training Period**: Last 10 years of data
+* **Sequence Length**: 252 trading days (1 year)
+* **Prediction Horizon**: 20 trading days
+* **Loss Function**: Quantile loss (pinball loss) for q10, q50, q90
+
 """
     
     if training_info:
@@ -152,7 +161,7 @@ print(f"90th percentile: {{quantiles_vol[0][2]:.2f}}%")
     card_content += """
 ## Limitations
 
-- The model is trained on specific stock market data and may not generalize well to other markets or time periods
+- Trained on large-cap tech stocks, and will not generalize well to other markets or time periods.
 - Predictions are probabilistic (quantiles) and should be interpreted with uncertainty
 - The model requires at least 60 days of historical data for predictions
 
@@ -290,11 +299,7 @@ def export_model(
         model_name = output_dir.name
     
     if description is None:
-        description = f"""
-A fine-tuned Chronos model for predicting stock market volatility. 
-This model predicts quantiles (q10, q50, q90) of log-realized variance 
-for a 20-day forward horizon using 60 days of historical squared returns.
-"""
+        description = """A fine-tuned Chronos model for predicting stock market volatility. This model predicts quantiles (q10, q50, q90) of log-realized variance for a 20-day forward horizon using 60 days of historical squared returns."""
     
     card_content = create_model_card(
         model_name=model_name,
@@ -322,7 +327,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import torch
 import json
-from src.models.chronos import ChronosVolatility
+from src.volatility.models.chronos import ChronosVolatility
 
 try:
     from peft import PeftModel
@@ -428,10 +433,12 @@ def load_exported_model(model_dir):
                 print(f"Note: {e}")
             
             # Upload files
+            print(f"Uploading files from {output_dir}...")
             api.upload_folder(
                 folder_path=str(output_dir),
                 repo_id=hub_repo_id,
-                commit_message="Upload ChronosVolatility model"
+                commit_message=f"Update ChronosVolatility model - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                ignore_patterns=["*.pyc", "__pycache__", ".git"]
             )
             
             print(f"✓ Successfully pushed to https://huggingface.co/{hub_repo_id}")
@@ -453,7 +460,7 @@ def main():
         '--checkpoint',
         type=str,
         default='models/checkpoints/chronos_5ticker.pt',
-        help='Path to model checkpoint'
+        help='Path to model checkpoint (default: models/checkpoints/chronos_5ticker.pt)'
     )
     parser.add_argument(
         '--output',
@@ -474,25 +481,28 @@ def main():
         help='Model description'
     )
     parser.add_argument(
-        '--push-to-hub',
+        '--no-push',
         action='store_true',
-        help='Push to Hugging Face Hub'
+        help='Skip pushing to Hugging Face Hub (default: will push to karkar69/chronos-volatility)'
     )
     parser.add_argument(
         '--hub-repo-id',
         type=str,
-        default=None,
-        help='Hugging Face Hub repository ID (e.g., username/model-name)'
+        default='karkar69/chronos-volatility',
+        help='Hugging Face Hub repository ID (default: karkar69/chronos-volatility)'
     )
     
     args = parser.parse_args()
+    
+    # Default to pushing to hub unless --no-push is specified
+    push_to_hub = not args.no_push
     
     export_model(
         checkpoint_path=args.checkpoint,
         output_dir=args.output,
         model_name=args.name,
         description=args.description,
-        push_to_hub=args.push_to_hub,
+        push_to_hub=push_to_hub,
         hub_repo_id=args.hub_repo_id,
     )
 

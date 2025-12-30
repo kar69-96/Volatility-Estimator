@@ -424,10 +424,13 @@ def main():
     model = ChronosVolatility(use_lora=True).to(device)
     
     # Train
-    print("\nStarting training...")
+    # Set epochs to number of stocks in training data
+    num_epochs = len(train_datasets)
+    print(f"\nStarting training...")
+    print(f"  Number of epochs: {num_epochs} (equal to number of stocks in training data)")
     if use_amp:
         print("  Mixed precision (FP16) training enabled for faster training")
-    model = train(model, train_loader, val_loader, epochs=50, lr=1e-4, device=device, use_amp=use_amp)
+    model = train(model, train_loader, val_loader, epochs=num_epochs, lr=1e-4, device=device, use_amp=use_amp)
     
     # Save
     checkpoint_dir = Path('models/checkpoints')

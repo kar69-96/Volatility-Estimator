@@ -10,16 +10,19 @@ Complete guide to set up and run training on Lambda Labs using the Lambda CLI.
 
 ## Step 1: Install Lambda CLI
 
-```bash
-# Install Lambda Labs CLI (NOT lambda-cli - that's a different package!)
-pip install lambdacloud
+You can use either CLI tool for managing Lambda Labs instances:
 
-# If you accidentally installed lambda-cli instead, uninstall it first:
-# pip uninstall lambda-cli
-# pip install lambdacloud
+**Option 1: Official Lambda Labs CLI (Recommended)**
+```bash
+pip install lambdacloud
 ```
 
-**Important**: The correct package is `lambdacloud` (Lambda Labs CLI), not `lambda-cli` (which is a different package).
+**Option 2: Third-party Lambda CLI**
+```bash
+pip install lambda-cli
+```
+
+**Note**: The training scripts support both CLIs. The official `lambdacloud` is recommended, but `lambda-cli` works as an alternative. Both will be installed automatically by the setup script.
 
 ### Add to PATH (if command not found)
 
@@ -107,11 +110,10 @@ For this training script:
 
 ### Launch Commands
 
-```bash
-# Launch a single A100 instance (40GB) - via web dashboard
-# When prompted for filesystem: Choose "No filesystem" for one-time training
+**Using Official CLI (`lambdacloud`):**
 
-# Or if using API/CLI (if available):
+```bash
+# Launch a single A100 instance (40GB)
 lambdacloud instance launch \
   --instance-type gpu_1x_a100 \
   --ssh-key-name lambda-key \
@@ -122,12 +124,43 @@ lambdacloud instance launch \
   --instance-type gpu_1x_a100_80gb \
   --ssh-key-name lambda-key \
   --region us-west-1
+
+# Cheaper alternative: A10
+lambdacloud instance launch \
+  --instance-type gpu_1x_a10 \
+  --ssh-key-name lambda-key \
+  --region us-west-1
 ```
 
-**Note**: Instance types available:
-- `gpu_1x_a100` - 1x A100 40GB
-- `gpu_1x_a100_80gb` - 1x A100 80GB
-- `gpu_1x_a10` - 1x A10 (cheaper alternative)
+**Using Third-party CLI (`lambda-cli`):**
+
+```bash
+# First, authenticate (if not already done)
+lambda auth
+
+# Launch a single A100 instance (40GB)
+lambda up --instance_type=gpu.1x.a100
+
+# Alternative: Launch A100 80GB
+lambda up --instance_type=gpu.1x.a100.80gb
+
+# Cheaper alternative: A10
+lambda up --instance_type=gpu.1x.a10
+
+# List running instances
+lambda ls
+
+# Get instance details (after launch)
+lambda ls  # Shows instance IDs and status
+```
+
+**Note**: Instance type naming differs between CLIs:
+- **lambdacloud**: `gpu_1x_a100`, `gpu_1x_a100_80gb`, `gpu_1x_a10`
+- **lambda-cli**: `gpu.1x.a100`, `gpu.1x.a100.80gb`, `gpu.1x.a10`
+
+**Via Web Dashboard:**
+- Go to [lambdalabs.com](https://lambdalabs.com)
+- When prompted for filesystem: Choose "No filesystem" for one-time training
 
 ### Important Notes
 
@@ -143,6 +176,8 @@ lambdacloud instance launch \
 
 ## Step 5: Get Instance Details
 
+**Using Official CLI (`lambdacloud`):**
+
 ```bash
 # List all instances
 lambdacloud instance list
@@ -154,13 +189,41 @@ lambdacloud instance get INSTANCE_ID
 lambdacloud instance get INSTANCE_ID --format json | jq '.ssh_command'
 ```
 
+**Using Third-party CLI (`lambda-cli`):**
+
+```bash
+# List all instances
+lambda ls
+
+# List with more details (if supported)
+lambda ls --verbose
+
+# Get instance details (replace INSTANCE_ID)
+# Note: lambda-cli may have different commands for detailed info
+lambda ls | grep INSTANCE_ID
+```
+
 ## Step 6: Connect to Instance
+
+**Using Official CLI (`lambdacloud`):**
 
 ```bash
 # SSH into the instance (replace INSTANCE_ID)
 lambdacloud instance ssh INSTANCE_ID
+```
 
-# Or use standard SSH
+**Using Third-party CLI (`lambda-cli`):**
+
+```bash
+# lambda-cli doesn't have a direct SSH command
+# Use standard SSH instead (get IP from 'lambda ls')
+ssh -i ~/.ssh/lambda_key ubuntu@<instance-ip>
+```
+
+**Standard SSH (works with both CLIs):**
+
+```bash
+# Get instance IP from either CLI, then:
 ssh -i ~/.ssh/lambda_key ubuntu@<instance-ip>
 ```
 
@@ -200,6 +263,48 @@ The setup script will:
 - Install PyTorch with CUDA support
 - Install all dependencies
 - Verify GPU availability
+
+## Step 8.5: Install Guest Agent (Optional but Recommended)
+
+The Lambda Guest Agent collects system metrics (GPU, VRAM utilization) and sends them to Lambda's backend. You can view these metrics in the Lambda Cloud console.
+
+**Note**: The metrics dashboard will be generally available in Q2 2025. To request early access, submit a support ticket.
+
+To install the Guest Agent:
+
+```bash
+# Make the install script executable
+chmod +x scripts/install_guest_agent.sh
+
+# Run the installation script
+bash scripts/install_guest_agent.sh
+```
+
+**Or install manually:**
+
+```bash
+# Download and install the Guest Agent
+curl -L https://lambdalabs-guest-agent.s3.us-west-2.amazonaws.com/scripts/install.sh | sudo bash
+
+# Verify it's running
+sudo systemctl --no-pager status lambda-guest-agent.service
+```
+
+Your metrics should appear in the Lambda Cloud console within a few minutes.
+
+**Additional Guest Agent Commands:**
+
+```bash
+# Check status
+sudo systemctl status lambda-guest-agent.service
+
+# Disable automatic updates (updates every 2 weeks by default)
+sudo systemctl stop lambda-guest-agent-updater.timer
+sudo systemctl disable lambda-guest-agent-updater.timer
+
+# Uninstall (if needed)
+sudo apt remove lambda-guest-agent
+```
 
 ## Step 9: Run Training
 
@@ -260,17 +365,38 @@ scp -i ~/.ssh/lambda_key \
 
 If you need to manually stop the instance:
 
+**Using Official CLI (`lambdacloud`):**
 ```bash
-# Stop the instance
 lambdacloud instance terminate INSTANCE_ID
+```
 
-# Or stop from within the instance
+**Using Third-party CLI (`lambda-cli`):**
+```bash
+lambda rm INSTANCE_ID
+```
+
+**From within the instance (last resort):**
+```bash
 sudo shutdown -h now
 ```
+**Note**: `sudo shutdown` only shuts down the OS but may not stop Lambda Labs billing. Use the CLI commands above to properly terminate.
 
 **Note**: If auto-termination fails, the script will print instructions on how to manually terminate.
 
+**Important**: The script uses the Lambda Labs CLI to properly terminate instances. It supports both:
+- `lambdacloud` (official CLI): `lambdacloud instance terminate <id>`
+- `lambda-cli` (third-party): `lambda rm <id>`
+
+If neither CLI is installed or authenticated on the instance, auto-termination will fail. Make sure to:
+1. Install at least one CLI on the instance: `pip install lambdacloud` OR `pip install lambda-cli`
+2. Authenticate:
+   - For `lambdacloud`: `lambdacloud auth login` or set `LAMBDA_API_KEY` environment variable
+   - For `lambda-cli`: `lambda auth`
+3. If auto-termination fails, manually terminate from the Lambda Labs dashboard to avoid continued billing
+
 ## Quick Reference Commands
+
+**Official CLI (`lambdacloud`):**
 
 ```bash
 # List instances
@@ -287,6 +413,25 @@ lambdacloud instance terminate INSTANCE_ID
 
 # View instance status
 lambdacloud instance get INSTANCE_ID
+```
+
+**Third-party CLI (`lambda-cli`):**
+
+```bash
+# Authenticate (first time)
+lambda auth
+
+# List instances
+lambda ls
+
+# Launch instance
+lambda up --instance_type=gpu.1x.a100
+
+# Stop instance
+lambda rm INSTANCE_ID
+
+# View instance status
+lambda ls  # Shows all instances with status
 ```
 
 ## Troubleshooting
@@ -307,6 +452,49 @@ lambdacloud instance get INSTANCE_ID
 ### Connection issues
 - Verify SSH key permissions: `chmod 600 ~/.ssh/lambda_key`
 - Check instance is running: `lambdacloud instance list`
+
+### Instance didn't auto-terminate after training
+**Problem**: Training completed but instance is still running and billing.
+
+**Causes**:
+1. Lambda CLI (`lambdacloud`) not installed on the instance
+2. Lambda CLI not authenticated (no API key)
+3. Instance ID could not be auto-detected
+4. Network issues preventing API call
+
+**Solutions**:
+1. **Install Lambda CLI on instance** (install at least one):
+   ```bash
+   # Option 1: Official CLI
+   pip install lambdacloud
+   lambdacloud auth login  # Or set LAMBDA_API_KEY env var
+   
+   # Option 2: Third-party CLI
+   pip install lambda-cli
+   lambda auth
+   ```
+
+2. **Manually set instance ID** before training:
+   ```bash
+   export LAMBDA_INSTANCE_ID="your-instance-id"
+   python3 scripts/train_sample.py
+   ```
+
+3. **Manually terminate** from your local machine:
+   ```bash
+   # Using official CLI
+   lambdacloud instance terminate <instance-id>
+   
+   # OR using third-party CLI
+   lambda rm <instance-id>
+   ```
+
+4. **Check instance status**:
+   ```bash
+   lambdacloud instance list
+   ```
+
+**Note**: The old version of `train_sample.py` used `sudo shutdown -h now`, which only shuts down the OS but doesn't properly terminate the Lambda Labs instance. The updated version uses the Lambda Labs CLI (`lambdacloud instance terminate` or `lambda rm`) which properly stops billing.
 
 ## Cost Optimization
 

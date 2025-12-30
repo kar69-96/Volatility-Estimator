@@ -81,15 +81,6 @@ chronos:
   use_lora: true            # Use LoRA adapters for efficient fine-tuning
   seq_length: 252           # Input sequence length (trading days, 1 year)
   prediction_horizon: 20    # Days ahead to predict
-
-# Fed Rate Predictor (LSTM/Transformer)
-fed_rate_predictor:
-  model_type: lstm          # lstm or transformer
-  hidden_dim: 64            # Hidden layer dimension
-  num_layers: 2             # Number of LSTM/Transformer layers
-  dropout: 0.2
-  bidirectional: false      # Use bidirectional LSTM
-  predict_magnitude: true   # Also predict rate change magnitude
   
   # Classification settings
   n_classes: 3              # Increase, Decrease, No Change
