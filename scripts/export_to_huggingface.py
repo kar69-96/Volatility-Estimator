@@ -68,7 +68,7 @@ This model is a fine-tuned version of [{base_model}](https://huggingface.co/{bas
 
 - **Input**: Single-channel time series of squared returns (shape: batch_size, seq_length=60)
 - **Sequence Length**: 60 trading days
-- **Preprocessing**: Input should be squared log returns: `(log(price_t / price_{t-1}))^2`
+- **Preprocessing**: Input should be squared log returns: `(log(price_t / price_{{t-1}}))^2`
 
 ## Output Format
 
@@ -120,9 +120,9 @@ with torch.no_grad():
 quantiles_var = np.exp(quantiles_log_var.numpy())
 quantiles_vol = np.sqrt(quantiles_var) * np.sqrt(252)  # Annualized %
 
-print(f"10th percentile: {{quantiles_vol[0][0]:.2f}}%")
-print(f"Median: {{quantiles_vol[0][1]:.2f}}%")
-print(f"90th percentile: {{quantiles_vol[0][2]:.2f}}%")
+print(f"10th percentile: {quantiles_vol[0][0]:.2f}%")
+print(f"Median: {quantiles_vol[0][1]:.2f}%")
+print(f"90th percentile: {quantiles_vol[0][2]:.2f}%")
 ```
 
 ## Training Details
@@ -161,12 +161,12 @@ print(f"90th percentile: {{quantiles_vol[0][2]:.2f}}%")
 If you use this model, please cite:
 
 ```bibtex
-@misc{{chronos-volatility,
-  title={{Chronos Fine-tuned for Volatility Prediction}},
-  author={{Your Name}},
-  year={{2024}},
-  publisher={{Hugging Face}}
-}}
+@misc{chronos-volatility,
+  title={Chronos Fine-tuned for Volatility Prediction},
+  author={Your Name},
+  year={2024},
+  publisher={Hugging Face}
+}
 ```
 
 ## License
